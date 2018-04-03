@@ -1,0 +1,3 @@
+[submodule "sh2"]
+	path = sh2
+	url = ../sh2.git

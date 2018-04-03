@@ -1,0 +1,28 @@
+# Emacs temp files
+*~
+\#*
+.\#*
+
+# Backup files
+*.back
+
+# Output files
+/EWARM/demo-i2c
+/EWARM/demo-spi
+/EWARM/demo-uart
+/EWARM/fsp200-dfu
+/EWARM/fsp200-cal
+/EWARM/sh2-demo Configuration/
+/EWARM/settings/
+/EWARM/sh2-demo.dep
+/EWARM/*.bak
+/EWARM/Backup*
+/EWARM/BuildLog.log
+
+# Firmware files that we don't want in project
+_firmware*
+
+EWARM.foo
+
+
+
