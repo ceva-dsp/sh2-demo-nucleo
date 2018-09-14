@@ -71,7 +71,7 @@
 #define DFU_CS_DEASSERT_DELAY_TX_US (5000)
 
 // How many bytes to read when reading the length field
-#define READ_LEN (2)
+#define READ_LEN (4)
 
 // ------------------------------------------------------------------------
 // Private types
@@ -356,8 +356,8 @@ static void spiActivate(void)
             {
                 spiState = SPI_RD_HDR;
                 
-                // Start SPI operation to read first 2 bytes of header (writing zeros)
-                HAL_SPI_TransmitReceive_IT(&spi, (uint8_t *)txZeros, rxBuf, 2);
+                // Start SPI operation to read header (writing zeros)
+                HAL_SPI_TransmitReceive_IT(&spi, (uint8_t *)txZeros, rxBuf, READ_LEN);
             }
         }
     }
@@ -387,21 +387,27 @@ static void spiCompleted(void)
     {
         // We read a header
 
-        // Transition to RD_BODY state
-        spiState = SPI_RD_BODY;
+        if (rxLen > READ_LEN) {
+            // There is more to read
+
+            // Transition to RD_BODY state
+            spiState = SPI_RD_BODY;
         
-        // Start a read operation for the remaining length.  (We already read the first 2 bytes.)
-        HAL_SPI_TransmitReceive_IT(&spi, (uint8_t *)txZeros, rxBuf+2, rxLen-2);
-    }
-    else if ((spiState == SPI_RD_BODY) ||
-             (spiState == SPI_WRITE))
-    {
-        if (spiState == SPI_WRITE)
-        {
-            // Tx buffer is empty now.
-            txBufLen = 0;
+            // Start a read operation for the remaining length.  (We already read the first READ_LEN bytes.)
+            HAL_SPI_TransmitReceive_IT(&spi, (uint8_t *)txZeros, rxBuf+READ_LEN, rxLen-READ_LEN);
         }
-        
+        else
+        {
+            // No SHTP payload was received, this operation is done
+            dbg_pulse(1);
+            csn(true);            // deassert CSN
+            rxBufLen = 0;         // no rx data available
+            spiState = SPI_IDLE;  // back to idle state
+            spiActivate();        // activate next operation, if any.
+        }
+    }
+    else if (spiState == SPI_RD_BODY)
+    {
         // We completed the read or write of a payload
         // deassert CSN.
         csn(true);
@@ -409,6 +415,25 @@ static void spiCompleted(void)
         // Check len of data read and set rxBufLen
         rxBufLen = rxLen;
 
+        // transition back to idle state
+        spiState = SPI_IDLE;
+
+        // Activate the next operation, if any.
+        spiActivate();
+    }
+    else if (spiState == SPI_WRITE)
+    {
+        // We completed the read or write of a payload
+        // deassert CSN.
+        csn(true);
+
+        // Since operation was a write, transaction was for txBufLen bytes.  So received
+        // data len is, at a maximum, txBufLen.
+        rxBufLen = (txBufLen < rxLen) ? txBufLen : rxLen;
+
+        // Tx buffer is empty now.
+        txBufLen = 0;
+        
         // transition back to idle state
         spiState = SPI_IDLE;
 
