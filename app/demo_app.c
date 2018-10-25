@@ -83,6 +83,7 @@ static void startReports()
         // SH2_RAW_GYROSCOPE,
         // SH2_ROTATION_VECTOR,
         // SH2_GYRO_INTEGRATED_RV,
+        // SH2_IZRO_MOTION_REQUEST,
     };
 
     // These sensor options are disabled or not used in most cases
@@ -405,6 +406,11 @@ static void printEvent(const sh2_SensorEvent_t * event)
                        r, i, j, k,
                        x, y, z);
             }
+            break;
+        case SH2_IZRO_MOTION_REQUEST:
+            printf("IZRO Request: intent:%d, request:%d\n",
+                   value.un.izroRequest.intent,
+                   value.un.izroRequest.request);
             break;
         default:
             printf("Unknown sensor: %d\n", value.sensorId);
