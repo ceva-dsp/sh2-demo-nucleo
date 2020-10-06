@@ -1,5 +1,5 @@
 /*
- * Copyright 2017-2018 Hillcrest Laboratories, Inc.
+ * Copyright 2017-2020 Hillcrest Laboratories, Inc.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License and 
@@ -16,7 +16,7 @@
  */
 
 /*
- * Demo App for Hillcrest BNO080, No RTOS edition.
+ * Demo App for Hillcrest SH-2 devices (BNO08x and FSP200)
  */
 
 // ------------------------------------------------------------------------
@@ -68,7 +68,6 @@
 #endif
 
 #define FIX_Q(n, x) ((int32_t)(x * (float)(1 << n)))
-const float scaleDegToRad = 3.14159265358 / 180.0;
 
 // --- Private data ---------------------------------------------------
 
@@ -511,7 +510,7 @@ void demo_init(void)
     // Print DSF file headers
     printDsfHeaders();
 #else
-    // Read and display BNO080 product ids
+    // Read and display device product ids
     reportProdIds();
 #endif
 

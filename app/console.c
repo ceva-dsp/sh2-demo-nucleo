@@ -1,5 +1,5 @@
 /*
- * Copyright 2015-16 Hillcrest Laboratories, Inc.
+ * Copyright 2015-20 Hillcrest Laboratories, Inc.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License and 
@@ -28,7 +28,7 @@
 
 #include "usart.h"
 
-#define CONSOLE_BUFLEN (128)
+#define CONSOLE_BUFLEN (4096)
 
 // ------------------------------------------------------------------------
 // Private types
