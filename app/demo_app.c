@@ -128,6 +128,7 @@ static void startReports()
     config.wakeupEnabled = false;
     config.changeSensitivityRelative = false;
     config.alwaysOnEnabled = false;
+    config.sniffEnabled = false;
     config.changeSensitivity = 0;
     config.batchInterval_us = 0;
     config.sensorSpecific = 0;
