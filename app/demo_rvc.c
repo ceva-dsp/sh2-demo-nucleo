@@ -1,9 +1,9 @@
 /*
- * Copyright 2017-2020 Hillcrest Laboratories, Inc.
+ * Copyright 2017-2021 CEVA, Inc.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License and 
- * any applicable agreements you may have with Hillcrest Laboratories, Inc.
+ * any applicable agreements you may have with CEVA, Inc.
  * You may obtain a copy of the License at
  *
  *   http://www.apache.org/licenses/LICENSE-2.0
@@ -16,7 +16,7 @@
  */
 
 /*
- * Demo App for Hillcrest SH2 devices (BNO08x and FSP200)
+ * Demo App for SH2 devices (BNO08x and FSP200)
  */
 
 // ------------------------------------------------------------------------
@@ -113,7 +113,7 @@ void demo_init(void)
     int status;
     
     printf("\n\n");
-    printf("Hillcrest RVC Demo.\n");
+    printf("CEVA RVC Demo.\n");
 
     status = rvc_init();
     if (status != RVC_OK) {
