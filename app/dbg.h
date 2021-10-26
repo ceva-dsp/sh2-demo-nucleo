@@ -33,7 +33,10 @@ void dbg_set(void);
 
 // Clear the debug pin
 void dbg_clear(void);
-    
+
+// Output a byte with manchester encoding
+void dbg_manchester(unsigned byte);
+
 // Pulse the debug2 pin <count> times, as fast as possible.
 void dbg2_pulse(unsigned count);
 

@@ -134,10 +134,11 @@ static void startReports()
     config.sensorSpecific = 0;
 
     // Select a report interval.
-    // config.reportInterval_us = 40000;  // microseconds (25Hz)
-    config.reportInterval_us = 10000;  // microseconds (100Hz)
-    // config.reportInterval_us = 2500;   // microseconds (400Hz)
-    // config.reportInterval_us = 1000;   // microseconds (1000Hz)
+    // config.reportInterval_us = 100000;  // microseconds (10 Hz)
+    // config.reportInterval_us = 40000;  // microseconds (25 Hz)
+    config.reportInterval_us = 10000;  // microseconds (100 Hz)
+    // config.reportInterval_us = 2500;   // microseconds (400 Hz)
+    // config.reportInterval_us = 1000;   // microseconds (1000 Hz)
 
     for (int n = 0; n < ARRAY_LEN(enabledSensors); n++)
     {
@@ -456,6 +457,7 @@ static void printEvent(const sh2_SensorEvent_t * event)
                    (value.un.shakeDetector.shake & SHAKE_X) ? 'X' : '.',
                    (value.un.shakeDetector.shake & SHAKE_Y) ? 'Y' : '.',
                    (value.un.shakeDetector.shake & SHAKE_Z) ? 'Z' : '.');
+
             break;
         default:
             printf("Unknown sensor: %d\n", value.sensorId);
@@ -481,17 +483,21 @@ void demo_init(void)
 {
     int status;
     
-    printf("\n\n");
-    printf("Hillcrest SH2 Demo.\n");
+    printf("\n\nCEVA SH2 Sensor Hub Demo.\n\n");
     
 #ifdef PERFORM_DFU
-    printf("DFU Process started.  (Completes in about 25 seconds.)\n");
+    printf("DFU completes in 10-25 seconds in most configurations.\n");
+    printf("It can take up to 240 seconds with 9600 baud UART.\n");
+    printf("DFU Process started.\n");
     status = dfu();
     if (status == SH2_OK) {
         printf("DFU completed successfully.\n");
     }
     else {
         printf("DFU failed.  Error=%d.\n", status);
+        if (status == SH2_ERR_BAD_PARAM) {
+            printf("Is the firmware image valid?\n");
+        }
     }
 #endif
 

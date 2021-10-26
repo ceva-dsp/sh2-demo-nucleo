@@ -10,6 +10,7 @@
 /EWARM/demo-i2c
 /EWARM/demo-spi
 /EWARM/demo-uart
+/EWARM/demo-rvc
 /EWARM/fsp200-dfu
 /EWARM/fsp200-cal
 /EWARM/sh2-demo Configuration/

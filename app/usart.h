@@ -40,7 +40,8 @@ typedef void (CpltCallback_t)(UART_HandleTypeDef *huart);
 
 // Register a client for a particular USART instance.
 void usartRegisterHandlers(UART_HandleTypeDef *huart,
-                           CpltCallback_t *rxCplt, CpltCallback_t *txCplt);
+                           CpltCallback_t *rxCplt, CpltCallback_t *txCplt,
+                           CpltCallback_t *err);
 
 // Unregister a client
 void usartUnregisterHandlers(UART_HandleTypeDef *huart);

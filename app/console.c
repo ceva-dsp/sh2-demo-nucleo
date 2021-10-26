@@ -106,7 +106,7 @@ void console_init(void)
     HAL_UART_Init(&consoleUart);
 
     // Register for rxCplt and txCplt callbacks on console uart
-    usartRegisterHandlers(&consoleUart, consoleRxCplt, consoleTxCplt);
+    usartRegisterHandlers(&consoleUart, consoleRxCplt, consoleTxCplt, 0);
 
     // Init FIFOs
     fifo_init(&txFifo, txFifoBuffer, sizeof(txFifoBuffer));

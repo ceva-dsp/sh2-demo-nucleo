@@ -45,6 +45,7 @@ typedef struct {
     UART_HandleTypeDef *huart;
     CpltCallback_t *rxCplt;
     CpltCallback_t *txCplt;
+    CpltCallback_t *err;
 } UsartHandler_t;
 
 #define NUM_USART (4)
@@ -68,7 +69,8 @@ static bool usartInitialized = false;
 // Register a client for a particular USART instance.
 void usartRegisterHandlers(UART_HandleTypeDef *huart,
                            CpltCallback_t *rxCplt,
-                           CpltCallback_t *txCplt)
+                           CpltCallback_t *txCplt,
+                           CpltCallback_t *err)
 {
     if (!usartInitialized) {
         usartInit();
@@ -81,6 +83,7 @@ void usartRegisterHandlers(UART_HandleTypeDef *huart,
             handler[n].huart = 0;
             handler[n].rxCplt = 0;
             handler[n].txCplt = 0;
+            handler[n].err = 0;
         }
     }
 
@@ -91,6 +94,7 @@ void usartRegisterHandlers(UART_HandleTypeDef *huart,
             handler[n].huart = huart;
             handler[n].rxCplt = rxCplt;
             handler[n].txCplt = txCplt;
+            handler[n].err = err;
             break;
         }
     }
@@ -110,6 +114,7 @@ void usartUnregisterHandlers(UART_HandleTypeDef *huart)
             handler[n].huart = 0;
             handler[n].rxCplt = 0;
             handler[n].txCplt = 0;
+            handler[n].err = 0;
         }
     }
 }
@@ -133,6 +138,17 @@ void HAL_UART_RxCpltCallback(UART_HandleTypeDef *huart)
         if (handler[n].huart == huart) {
             if (handler[n].rxCplt != 0) {
                 handler[n].rxCplt(huart);
+            }
+        }
+    }
+}
+
+void HAL_UART_ErrorCallback(UART_HandleTypeDef *huart)
+{
+    for (int n = 0; n < NUM_USART; n++) {
+        if (handler[n].huart == huart) {
+            if (handler[n].err != 0) {
+                handler[n].err(huart);
             }
         }
     }

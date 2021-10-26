@@ -416,7 +416,7 @@ int rvc_hal_open(void)
     inReset = true;
     
     // init USART
-    usartRegisterHandlers(&huart1, 0, 0);
+    usartRegisterHandlers(&huart1, 0, 0, 0);
     setupUsart(RVC_BPS);
     
     // delay to ensure reset hold time

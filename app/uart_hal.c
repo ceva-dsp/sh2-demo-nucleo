@@ -30,8 +30,17 @@
 #include "stm32f4xx_hal.h"
 #include "stm32f4xx_hal_tim.h"
 #include "usart.h"
+#include "dbg.h"
 
-#define SH2_BPS (3000000)            // 3Mbps for UART-SHTP
+// For FSP200 UART-SHTP Autobaud, uncomment and set desired baud rate in SH2_BPS
+// #define USE_FSP200_SHTP_AUTOBAUD
+
+#ifdef USE_FSP200_SHTP_AUTOBAUD
+#define SH2_BPS (115200)             // 9600 - 2.3M for FSP200 SHTP AUTOBAUD
+#else
+#define SH2_BPS (3000000)            // always 3Mbps with no autobaud
+#endif
+
 #define BNO_DFU_BPS (115200)         // 115200 bps for UART-DFU
 
 
@@ -58,6 +67,9 @@
 #define INTN_PORT GPIOA
 #define INTN_PIN GPIO_PIN_10
 
+#define H_MOSI_ABN_PORT GPIOA
+#define H_MOSI_ABN_PIN GPIO_PIN_7
+
 #define RFC1662_FLAG (0x7e)
 #define RFC1662_ESCAPE (0x7d)
 
@@ -65,7 +77,11 @@
 #define PROTOCOL_SHTP (1)
 
 // Time between transmitted characters
-#define TX_INTERVAL_US (100)
+// With autobaud, adjust TX interval to include 10-bit char transmit time.
+// Explanation: 1000000.0 : 1 million microseconds per second
+//              10.0      : 10 bit times per character
+#define TX_CHAR_US ((1000000.0 * 10.0/SH2_BPS))  // time for one char to clock out
+#define TX_INTERVAL_US ((TX_CHAR_US >= 100.0) ? (unsigned)(TX_CHAR_US*1.2) : 100)
 
 // Keep reset asserted this long.
 // (Some targets have a long RC decay on reset.)
@@ -108,7 +124,8 @@ UART_HandleTypeDef huart1;
 TIM_HandleTypeDef tim2;
 
 // receive support
-static uint8_t rxBuffer[SH2_HAL_DMA_SIZE]; // receives UART data via DMA (must be a power of 2)
+#define UART_HAL_DMA_SIZE (64)            // must be a power of 2!
+static uint8_t rxBuffer[UART_HAL_DMA_SIZE]; // receives UART data via DMA (must be a power of 2)
 static uint32_t rxIndex = 0;               // next index to read
 static uint32_t rxTimestamp_uS;            // timestamp of INTN event
 
@@ -139,6 +156,12 @@ static sh2_Hal_t dfuHal;
 
 // FSP200 DFU UART HAL instance
 static sh2_Hal_t fsp200DfuHal;
+
+#ifdef USE_FSP200_SHTP_AUTOBAUD
+// FSP200 autobaud sequence
+#define FSP200_AUTOBAUD_CHAR (0x55)
+static const uint8_t fsp200_autobaud[] = { FSP200_AUTOBAUD_CHAR };
+#endif
 
 // ------------------------------------------------------------------------
 // Private methods
@@ -210,6 +233,22 @@ static void hal_init_gpio(void)
     GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_VERY_HIGH;
     HAL_GPIO_Init(CLKSEL0_PORT, &GPIO_InitStruct);
     HAL_GPIO_WritePin(CLKSEL0_PORT, CLKSEL0_PIN, GPIO_PIN_RESET);
+
+    /* Configure H_MOSI_ABN pin */
+#ifdef USE_FSP200_SHTP_AUTOBAUD
+    GPIO_InitStruct.Pin = H_MOSI_ABN_PIN;
+    GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_PP;
+    GPIO_InitStruct.Pull = GPIO_NOPULL;
+    GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
+    HAL_GPIO_Init(H_MOSI_ABN_PORT, &GPIO_InitStruct);
+    HAL_GPIO_WritePin(H_MOSI_ABN_PORT, H_MOSI_ABN_PIN, GPIO_PIN_RESET);
+#else
+    GPIO_InitStruct.Pin = H_MOSI_ABN_PIN;
+    GPIO_InitStruct.Mode = GPIO_MODE_INPUT;
+    GPIO_InitStruct.Pull = GPIO_PULLUP;
+    GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
+    HAL_GPIO_Init(H_MOSI_ABN_PORT, &GPIO_InitStruct);
+#endif
 
     /* EXTI interrupt init*/
     HAL_NVIC_SetPriority(EXTI15_10_IRQn, 5, 0);
@@ -449,11 +488,15 @@ static void reset_delay_us(uint32_t t)
 static void txStep(void)
 {
     // Inactive, return quickly
-    if (txState == TX_IDLE) return;
+    if (txState == TX_IDLE) {
+        return;
+    }
 
     // Not enough time elapsed since last transmit, skip this
     uint32_t now = timeNowUs();
-    if ((now - lastTxTime) < TX_INTERVAL_US) return;
+    if ((now - lastTxTime) < TX_INTERVAL_US) {
+        return;
+    }
 
     // We have stuff to do and it's time to do it.
     if (txState == TX_SENDING_BSQ) {
@@ -465,6 +508,7 @@ static void txStep(void)
             txState = TX_SENDING_FRAME;
         }
         else {
+            // Send one byte of BSQ
             HAL_UART_Transmit_IT(&huart1, (uint8_t *)&bsq[txIndex], 1);
             txIndex = (txIndex + 1) % sizeof(bsq);
             lastTxTime = now;
@@ -530,6 +574,14 @@ static void txEncode(uint8_t *pSrc, uint32_t len)
     txStore(RFC1662_FLAG);
 }
 
+// Called by USART driver when an error is detected.
+// Read function will reset receive process and restart comms.
+volatile bool usartErrorEncountered = false;
+void usartError(UART_HandleTypeDef *huart)
+{
+    usartErrorEncountered = true;
+}
+
 // ------------------------------------------------------------------------
 // SHTP UART HAL Methods
 
@@ -551,26 +603,6 @@ static int sh2_uart_hal_open_aux(sh2_Hal_t *self, bool dfu)
     // Init hardware peripherals
     hal_init_hw();
 
-    // register for rx, tx callbacks (no handlers used, actually)
-    usartRegisterHandlers(&huart1, 0, 0);
-
-    // Initialize USART peripheral
-    setupUsart(SH2_BPS);
-
-    // Delay for RESET_DELAY_US to ensure reset takes effect
-    delay_us(RESET_DELAY_US);
-    
-    // Reset RFC 1662 decoder
-    rfc1662_reset();
-
-    // Reset BSQ/BSN negotiation
-    lastBsn = 0;
-
-    enableInts();
-
-    // Start data flowing
-    HAL_UART_Receive_DMA(&huart1, rxBuffer, sizeof(rxBuffer));
-
     // To boot in SHTP-UART mode, must have PS1=1, PS0=0.
     // PS1 is set via jumper.
     // PS0 will be 0 if PS0 jumper is 0 OR (PS1 jumper is 1 AND PS0_WAKEN sig is 0)
@@ -581,11 +613,38 @@ static int sh2_uart_hal_open_aux(sh2_Hal_t *self, bool dfu)
     // Use DFU flag to decide whether to go into DFU mode
     bootn(!dfu);
 
+    // Delay for RESET_DELAY_US to ensure reset takes effect
+    delay_us(RESET_DELAY_US);
+    
+    // Reset RFC 1662 decoder
+    rfc1662_reset();
+
+    // Reset BSQ/BSN negotiation
+    lastBsn = 0;
+
+    // register for rx, tx callbacks (no handlers used, actually)
+    usartRegisterHandlers(&huart1, 0, 0, usartError);
+
+    // Initialize USART peripheral
+    setupUsart(SH2_BPS);
+
+    enableInts();
+
+    // Start data flowing
+    HAL_UART_Receive_DMA(&huart1, rxBuffer, sizeof(rxBuffer));
+
     // Deassert reset
     rstn(true);
 
     // Wait for INTN to be asserted
     reset_delay_us(START_DELAY_US);
+
+#ifdef USE_FSP200_SHTP_AUTOBAUD
+    // For FSP200 SHTP-AUTOBAUD, send one autobaud sense char now.
+    HAL_UART_Transmit_IT(&huart1,
+                         (uint8_t *)fsp200_autobaud,
+                         sizeof(fsp200_autobaud));
+#endif
 
     return SH2_OK;
 }
@@ -625,12 +684,23 @@ static void sh2_uart_hal_close(sh2_Hal_t *self)
 static int sh2_uart_hal_read(sh2_Hal_t *self, uint8_t *pBuffer, unsigned len, uint32_t *t)
 {
     uint32_t stopPoint = sizeof(rxBuffer)-__HAL_DMA_GET_COUNTER(&hdma_usart1_rx);
+    int retval = 0;
 
     // This function needs to:
     //  * Process data from DMA buffer, through frame assembly.
     //  * Store data from BSN frames for Tx side.
     //  * Keep tx data flowing (at 1 char per 100uS.)
     //  * Deliver a whole frame to caller, if one is ready
+
+    // If UART encountered an error, get data flowing again.
+    if (usartErrorEncountered) {
+        usartErrorEncountered = false;
+        // reset receiver state
+        rxIndex = 0;
+        rfc1662_reset();
+        // restart DMA process
+        HAL_UART_Receive_DMA(&huart1, rxBuffer, sizeof(rxBuffer));
+    }
 
     while ((rxIndex != stopPoint) && !rxFrameReady) {
         rfc1662_rx(rxBuffer[rxIndex]);
@@ -652,19 +722,23 @@ static int sh2_uart_hal_read(sh2_Hal_t *self, uint8_t *pBuffer, unsigned len, ui
     
     // If a frame was assembled, return it
     if (rxFrameReady) {
-        // Set timestamp when returning a frame
-        *t = rxTimestamp_uS;
+        if (rxFrameLen <= sizeof(rxFrame)) {
+            // Set timestamp when returning a frame
+            *t = rxTimestamp_uS;
         
-        // Copy into pBuffer
-        memcpy(pBuffer, &rxFrame[1], rxFrameLen-1);  // Copy all but first char, protocol id
+            // Copy into pBuffer
+            memcpy(pBuffer, &rxFrame[1], rxFrameLen-1);  // Copy all but first char, protocol id
         
-        // signal that we consumed the frame
+            // signal that we consumed the frame
+            retval = rxFrameLen-1;
+        }
+        else {
+            // Frame overflowed rxFrame buffer and was discarded
+        }
         rxFrameReady = false;
-
-        return rxFrameLen-1;
     }
     
-    return 0;
+    return retval;
 }
 
 static int sh2_uart_hal_write(sh2_Hal_t *self, uint8_t *pBuffer, unsigned len)
@@ -728,7 +802,7 @@ static int dfu_uart_hal_open(sh2_Hal_t *self)
     delay_us(RESET_DELAY_US);
     
     // register for rx, tx callbacks
-    usartRegisterHandlers(&huart1, 0, onTxCpltDfu);
+    usartRegisterHandlers(&huart1, 0, onTxCpltDfu, 0);
 
     // Initialize USART peripheral
     setupUsart(BNO_DFU_BPS);
