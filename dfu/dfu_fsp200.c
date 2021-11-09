@@ -1,9 +1,9 @@
 /*
- * Copyright 2018 Hillcrest Laboratories, Inc.
+ * Copyright 2018-21 CEVA, Inc.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License and 
- * any applicable agreements you may have with Hillcrest Laboratories, Inc.
+ * any applicable agreements you may have with CEVA, Inc.
  * You may obtain a copy of the License at
  *
  *   http://www.apache.org/licenses/LICENSE-2.0
@@ -30,16 +30,16 @@
 #include "sh2_hal_init.h"
 #include "firmware-fsp200.h"
 
-#define MAX_PACKET_LEN (64)
+#define CHAN_BOOTLOADER_CONTROL    (1)
+
+
 #define DFU_MAX_ATTEMPTS (5)
 
-// DFU should complete in less than 30 seconds.
-#define DFU_TIMEOUT_US (30000000)
+// DFU should complete in about 36 seconds.  Set timeout at 60.
+#define DFU_TIMEOUT_US (240000000)  // Can take up to 240 sec at 9600 baud.
 
 // ------------------------------------------------------------------------
 // Type definitions
-
-#define GUID_BOOTLOADER (10)
 
 // Bootloader message ids
 typedef enum {
@@ -125,15 +125,12 @@ typedef struct {
     bool firmwareOpened;
     const HcBin_t *firmware;
     uint32_t appLen;
-    uint8_t packetLen;
 
     uint16_t wordOffset;      // offset of next 32-bit word to write
     uint16_t writeLen;        // length of last write, in words
 
     uint32_t ignoredResponses;
 
-    uint8_t controlChan;  // Channel number for DFU over SHTP
-    
     DfuState_t state;
 } Dfu_t;
 
@@ -154,7 +151,6 @@ static void initState(void)
     dfu_.status = SH2_OK;
     dfu_.firmwareOpened = false;
     dfu_.appLen = 0;
-    dfu_.packetLen = 0;
 
     dfu_.ignoredResponses = 0;
 
@@ -210,12 +206,6 @@ static void openFirmware()
         dfu_.status = SH2_ERR_BAD_PARAM;
         return;
     }
-
-    // Determine packet length to use
-    dfu_.packetLen = dfu_.firmware->getPacketLen();
-    if ((dfu_.packetLen == 0) || (dfu_.packetLen > MAX_PACKET_LEN)) {
-        dfu_.packetLen = MAX_PACKET_LEN;
-    }
 }
 
 static uint32_t getU32(uint8_t *payload, unsigned offset)
@@ -249,13 +239,12 @@ typedef struct {
 
 static void requestUpgrade(void)
 {
-    uint8_t chan = dfu_.controlChan;
     OpModeRequest_t req;
 
     req.reportId = ID_OPMODE_REQ;
     req.opMode = OPMODE_UPGRADE;
     
-    shtp_send(dfu_.pShtp, chan, (uint8_t *)&req, sizeof(req));
+    shtp_send(dfu_.pShtp, CHAN_BOOTLOADER_CONTROL, (uint8_t *)&req, sizeof(req));
 }
 
 static DfuState_t handleInitStatus(uint8_t *payload, uint16_t len)
@@ -264,26 +253,16 @@ static DfuState_t handleInitStatus(uint8_t *payload, uint16_t len)
     uint32_t status = getU32(payload, 4);
     uint32_t errCode = getU32(payload, 8);
 
-    // At this point, advertisements should be done, we can determine
-    // the channel number to use for DFU
-    dfu_.controlChan = shtp_chanNo(dfu_.pShtp, "Bootloader", "control");
-    if (dfu_.controlChan == 0xFF) {
-        // Couldn't resolve channel no!
-        dfu_.status = SH2_ERR_IO;
-        nextState = ST_FINISHED;
+    // Make sure status says we can proceed.
+    if (status & STATUS_LAUNCH_BOOTLOADER) {
+        // Issue request to start download
+        requestUpgrade();
+        nextState = ST_SETTING_MODE;
     }
     else {
-        // Make sure status says we can proceed.
-        if (status & STATUS_LAUNCH_BOOTLOADER) {
-            // Issue request to start download
-            requestUpgrade();
-            nextState = ST_SETTING_MODE;
-        }
-        else {
-            // Can't start
-            dfu_.status = SH2_ERR_HUB;
-            nextState = ST_FINISHED;
-        }
+        // Can't start
+        dfu_.status = SH2_ERR_HUB;
+        nextState = ST_FINISHED;
     }
     
     return nextState;
@@ -299,7 +278,6 @@ typedef struct {
 
 static void requestWrite(void)
 {
-    uint8_t chan = dfu_.controlChan;
     WriteRequest_t req;
 
     // How many words to write next
@@ -314,7 +292,7 @@ static void requestWrite(void)
     req.wordOffset_msb = (dfu_.wordOffset >>8) & 0xFF;
     dfu_.firmware->getAppData(req.data, dfu_.wordOffset*4, dfu_.writeLen*4);
     
-    shtp_send(dfu_.pShtp, chan, (uint8_t *)&req, sizeof(req));
+    shtp_send(dfu_.pShtp, CHAN_BOOTLOADER_CONTROL, (uint8_t *)&req, sizeof(req));
 }
 
 static DfuState_t handleModeResponse(uint8_t *payload, uint16_t len)
@@ -368,13 +346,12 @@ static DfuState_t handleWriteResponse(uint8_t *payload, uint16_t len)
 
 static void requestLaunch(void)
 {
-    uint8_t chan = dfu_.controlChan;
     OpModeRequest_t req;
 
     req.reportId = ID_OPMODE_REQ;
     req.opMode = OPMODE_APPLICATION;
     
-    shtp_send(dfu_.pShtp, chan, (uint8_t *)&req, sizeof(req));
+    shtp_send(dfu_.pShtp, CHAN_BOOTLOADER_CONTROL, (uint8_t *)&req, sizeof(req));
 }
 
 static DfuState_t handleFinalStatus(uint8_t *payload, uint16_t len)
@@ -483,7 +460,7 @@ int dfu(void)
     dfu_.pShtp = shtp_open(dfu_.pHal);
     
     // Register handlers for DFU-oriented channels
-    shtp_listenChan(dfu_.pShtp, GUID_BOOTLOADER, "control", hdlr, &dfu_);
+    shtp_listenChan(dfu_.pShtp, CHAN_BOOTLOADER_CONTROL, hdlr, &dfu_);
 
     // service SHTP until DFU process completes
     now_us = dfu_.pHal->getTimeUs(dfu_.pHal);
@@ -493,6 +470,10 @@ int dfu(void)
     {
         shtp_service(dfu_.pShtp);
         now_us = dfu_.pHal->getTimeUs(dfu_.pHal);
+    }
+    
+    if (dfu_.state != ST_FINISHED) {
+        dfu_.status = SH2_ERR_TIMEOUT;
     }
 
     // close SHTP

@@ -1,12 +1,12 @@
-# Example Application for Hillcrest SH2 sensor modules
+# Example Application for CEVA SH2 sensor modules
 
 This repository contains example code showing how to use the SH2
-library to interface with Hillcrest Lab's SH2 sensor modules.  These
+library to interface with CEVA's SH2 sensor modules.  These
 include the BNO080 and BNO085 processors as well as the FSP200 module.
 
 The BNO080 configurations of this project run on the BNO080
 development kit.  This consists of an ST Microelectronics Nucleo board
-combinded with a BNO080 shield board made by Hillcrest.
+combinded with a BNO080 shield board made by CEVA.
 
 Note: This repository is similar to another one, bno080-nucleo-demo.
 That earlier repository used FreeRTOS and only supported the BNO080
@@ -18,7 +18,7 @@ module.
 
 * IAR Embedded Workbench for ARM (EWARM) version 7.4
 * STM32F411 Nucleo board
-* Hillcrest BNO080 Shield board
+* CEVA BNO080 Shield board
 
 ## Setup
 
@@ -44,7 +44,7 @@ reading and printing Game Rotation Vectors from the sensor hub:
 
 ```
 
-Hillcrest SH2 Demo.
+CEVA SH2 Demo.
 Part 10003608 : Version 3.2.12 Build 475
 Part 10003606 : Version 1.2.4 Build 230
 Part 10003254 : Version 4.4.3 Build 485

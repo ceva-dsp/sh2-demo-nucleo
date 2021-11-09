@@ -1,9 +1,9 @@
 /*
- * Copyright 2017-2018 Hillcrest Laboratories, Inc.
+ * Copyright 2017-2021 CEVA, Inc.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License and 
- * any applicable agreements you may have with Hillcrest Laboratories, Inc.
+ * any applicable agreements you may have with CEVA, Inc.
  * You may obtain a copy of the License at
  *
  *   http://www.apache.org/licenses/LICENSE-2.0
@@ -16,11 +16,29 @@
  */
 
 /*
- * Demo App for Hillcrest BNO080, No RTOS edition.
+ * Demo App for SH-2 devices (BNO08x and FSP200)
  */
 
 // ------------------------------------------------------------------------
 // Configure Compile time options for the demo app
+
+// Running this demo.
+// The demo app included here, simply establishes communications with the
+// sensor hub, enables one or more sensors, then prints the sensor reports
+// to the console.
+//
+// To select which sensors are enabled, you can edit the enabledSensors[]
+// array, found below.  And the requested rate is set in
+// config.reportInterval_us.
+//
+// Normally, sensor values are printed in a format that's easy to read.  But
+// the user may want to produce records in DSF format for further analysis.
+// To do so, enable the DSF_OUTPUT option, below.
+//
+// If the shake detector is enabled, you may also want to configure that
+// detector for a different threshold or timing.  To do so, uncomment the
+// CONFIG_SHAKE_DETECTOR flag here, then change the shake configuration
+// parameters by the function configShakeDetector().
 
 // Define this to produce DSF data for logging
 // #define DSF_OUTPUT
@@ -28,8 +46,8 @@
 // Define this to perform fimware update at startup.
 // #define PERFORM_DFU
 
-// Define this to use HMD-appropriate configuration.
-// #define CONFIGURE_HMD
+// Define this to configure the shake detector
+// #define CONFIG_SHAKE_DETECTOR
 
 // ------------------------------------------------------------------------
 
@@ -49,16 +67,7 @@
 #include "dfu.h"
 #endif
 
-#ifdef CONFIGURE_HMD
-    // Enable GIRV prediction for 28ms with 100Hz sync
-    #define GIRV_PRED_AMT FIX_Q(10, 0.028)             // prediction amt: 28ms
-#else
-    // Disable GIRV prediction
-    #define GIRV_PRED_AMT FIX_Q(10, 0.0)               // prediction amt: 0
-#endif
-
 #define FIX_Q(n, x) ((int32_t)(x * (float)(1 << n)))
-const float scaleDegToRad = 3.14159265358 / 180.0;
 
 // --- Private data ---------------------------------------------------
 
@@ -69,6 +78,33 @@ sh2_Hal_t *pSh2Hal = 0;
 bool resetOccurred = false;
 
 // --- Private methods ----------------------------------------------
+
+#ifdef CONFIG_SHAKE_DETECTOR
+
+// Configuration of shake detector
+#define MIN_SHAKE_TIME_US (50000)      // 50ms min shake time
+#define MAX_SHAKE_TIME_US (400000)     // 400ms max shake time
+#define SHAKE_THRESHOLD FIX_Q(26, 0.5) // m/s^2 threshold
+#define SHAKE_COUNT (3)                // 2 direction changes constitute a shake
+#define ENABLE_FLAGS (0x00000007)      // X, Y and Z axes enabled.
+
+static void configShakeDetector(void)
+{
+    uint32_t frsData[5];
+
+    frsData[0] = MIN_SHAKE_TIME_US;
+    frsData[1] = MAX_SHAKE_TIME_US;
+    frsData[2] = SHAKE_THRESHOLD;
+    frsData[3] = SHAKE_COUNT;
+    frsData[4] = ENABLE_FLAGS;
+
+    int status = sh2_setFrs(SHAKE_DETECT_CONFIG, frsData, 5);
+    if (status < 0) {
+        printf("Configure shake detector failed: %d\n", status);
+    }
+}
+
+#endif
 
 // Configure one sensor to produce periodic reports
 static void startReports()
@@ -83,6 +119,8 @@ static void startReports()
         // SH2_RAW_GYROSCOPE,
         // SH2_ROTATION_VECTOR,
         // SH2_GYRO_INTEGRATED_RV,
+        // SH2_IZRO_MOTION_REQUEST,
+        // SH2_SHAKE_DETECTOR,
     };
 
     // These sensor options are disabled or not used in most cases
@@ -90,14 +128,17 @@ static void startReports()
     config.wakeupEnabled = false;
     config.changeSensitivityRelative = false;
     config.alwaysOnEnabled = false;
+    config.sniffEnabled = false;
     config.changeSensitivity = 0;
     config.batchInterval_us = 0;
     config.sensorSpecific = 0;
 
     // Select a report interval.
-    config.reportInterval_us = 10000;  // microseconds (100Hz)
-    // config.reportInterval_us = 2500;   // microseconds (400Hz)
-    // config.reportInterval_us = 1000;   // microseconds (1000Hz)
+    // config.reportInterval_us = 100000;  // microseconds (10 Hz)
+    // config.reportInterval_us = 40000;  // microseconds (25 Hz)
+    config.reportInterval_us = 10000;  // microseconds (100 Hz)
+    // config.reportInterval_us = 2500;   // microseconds (400 Hz)
+    // config.reportInterval_us = 1000;   // microseconds (1000 Hz)
 
     for (int n = 0; n < ARRAY_LEN(enabledSensors); n++)
     {
@@ -406,6 +447,18 @@ static void printEvent(const sh2_SensorEvent_t * event)
                        x, y, z);
             }
             break;
+        case SH2_IZRO_MOTION_REQUEST:
+            printf("IZRO Request: intent:%d, request:%d\n",
+                   value.un.izroRequest.intent,
+                   value.un.izroRequest.request);
+            break;
+        case SH2_SHAKE_DETECTOR:
+            printf("Shake Axis: %c%c%c\n", 
+                   (value.un.shakeDetector.shake & SHAKE_X) ? 'X' : '.',
+                   (value.un.shakeDetector.shake & SHAKE_Y) ? 'Y' : '.',
+                   (value.un.shakeDetector.shake & SHAKE_Z) ? 'Z' : '.');
+
+            break;
         default:
             printf("Unknown sensor: %d\n", value.sensorId);
             break;
@@ -430,17 +483,21 @@ void demo_init(void)
 {
     int status;
     
-    printf("\n\n");
-    printf("Hillcrest SH2 Demo.\n");
+    printf("\n\nCEVA SH2 Sensor Hub Demo.\n\n");
     
 #ifdef PERFORM_DFU
-    printf("DFU Process started.  (Completes in about 25 seconds.)\n");
+    printf("DFU completes in 10-25 seconds in most configurations.\n");
+    printf("It can take up to 240 seconds with 9600 baud UART.\n");
+    printf("DFU Process started.\n");
     status = dfu();
     if (status == SH2_OK) {
         printf("DFU completed successfully.\n");
     }
     else {
         printf("DFU failed.  Error=%d.\n", status);
+        if (status == SH2_ERR_BAD_PARAM) {
+            printf("Is the firmware image valid?\n");
+        }
     }
 #endif
 
@@ -460,13 +517,20 @@ void demo_init(void)
     // Print DSF file headers
     printDsfHeaders();
 #else
-    // Read and display BNO080 product ids
+    // Read and display device product ids
     reportProdIds();
 #endif
 
     // resetOccurred would have been set earlier.
     // We can reset it since we are starting the sensor reports now.
     resetOccurred = false;
+
+#ifdef CONFIG_SHAKE_DETECTOR
+    // Configure shake detector
+    // (The configuration will be permantently stored in flash but
+    // doesn't take effect until the system is restarted.)
+    configShakeDetector();
+#endif
 
     // Start the flow of sensor reports
     startReports();

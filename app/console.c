@@ -1,9 +1,9 @@
 /*
- * Copyright 2015-16 Hillcrest Laboratories, Inc.
+ * Copyright 2015-21 CEVA, Inc.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License and 
- * any applicable agreements you may have with Hillcrest Laboratories, Inc.
+ * any applicable agreements you may have with CEVA, Inc.
  * You may obtain a copy of the License at
  *
  *   http://www.apache.org/licenses/LICENSE-2.0
@@ -28,7 +28,7 @@
 
 #include "usart.h"
 
-#define CONSOLE_BUFLEN (128)
+#define CONSOLE_BUFLEN (4096)
 
 // ------------------------------------------------------------------------
 // Private types
@@ -106,7 +106,7 @@ void console_init(void)
     HAL_UART_Init(&consoleUart);
 
     // Register for rxCplt and txCplt callbacks on console uart
-    usartRegisterHandlers(&consoleUart, consoleRxCplt, consoleTxCplt);
+    usartRegisterHandlers(&consoleUart, consoleRxCplt, consoleTxCplt, 0);
 
     // Init FIFOs
     fifo_init(&txFifo, txFifoBuffer, sizeof(txFifoBuffer));

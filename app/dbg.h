@@ -1,9 +1,9 @@
 /*
- * Copyright 2015-16 Hillcrest Laboratories, Inc.
+ * Copyright 2015-21 CEVA, Inc.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License and 
- * any applicable agreements you may have with Hillcrest Laboratories, Inc.
+ * any applicable agreements you may have with CEVA, Inc.
  * You may obtain a copy of the License at
  *
  *   http://www.apache.org/licenses/LICENSE-2.0
@@ -33,7 +33,10 @@ void dbg_set(void);
 
 // Clear the debug pin
 void dbg_clear(void);
-    
+
+// Output a byte with manchester encoding
+void dbg_manchester(unsigned byte);
+
 // Pulse the debug2 pin <count> times, as fast as possible.
 void dbg2_pulse(unsigned count);
 

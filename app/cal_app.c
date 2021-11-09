@@ -1,9 +1,9 @@
 /*
- * Copyright 2017 Hillcrest Laboratories, Inc.
+ * Copyright 2017-21 CEVA, Inc.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License and 
- * any applicable agreements you may have with Hillcrest Laboratories, Inc.
+ * any applicable agreements you may have with CEVA, Inc.
  * You may obtain a copy of the License at
  *
  *   http://www.apache.org/licenses/LICENSE-2.0
@@ -16,7 +16,7 @@
  */
 
 /*
- * Simple Calibration App for Hillcrest FSP200, No RTOS edition.
+ * Simple Calibration App for CEVA FSP200.
  */
 
 
@@ -73,7 +73,7 @@ void demo_init(void)
     int status;
     
     printf("\n\n");
-    printf("Hillcrest FSP200 Calibration Demo.\n");
+    printf("CEVA FSP200 Calibration Demo.\n");
     
     // Create HAL instance
     pSh2Hal = sh2_hal_init();

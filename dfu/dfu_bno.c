@@ -1,9 +1,9 @@
 /*
- * Copyright 2015-18 Hillcrest Laboratories, Inc.
+ * Copyright 2015-21 CEVA, Inc.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License and 
- * any applicable agreements you may have with Hillcrest Laboratories, Inc.
+ * any applicable agreements you may have with CEVA, Inc.
  * You may obtain a copy of the License at
  *
  *   http://www.apache.org/licenses/LICENSE-2.0
@@ -87,7 +87,8 @@ int dfu(void)
         goto close_and_return;
     }
     if ((strcmp(s, "1000-3608") != 0) &&
-        (strcmp(s, "1000-3676") != 0)) {
+        (strcmp(s, "1000-3676") != 0) &&
+        (strcmp(s, "1000-4148") != 0)) {
         // Incorrect part number
         status = SH2_ERR_BAD_PARAM;
         goto close_and_return;
