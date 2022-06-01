@@ -1,5 +1,5 @@
 /*
- * Copyright 2017-2021 CEVA, Inc.
+ * Copyright 2022 CEVA, Inc.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License and 
@@ -16,19 +16,22 @@
  */
 
 /*
- * Declare init methods for sh2 HAL and DFU HAL.
+ * UART HAL for BNO08x
  */
 
-#ifndef SH2_HAL_INIT_H
-#define SH2_HAL_INIT_H
+#include "uart_hal.h"
 
-#include "sh2_hal.h"
+uart_hal_t sh2_hal;
+uart_hal_t dfu_hal;
 
-// Initialize the SHTP HAL and return a reference to it.
-sh2_Hal_t *sh2_hal_init(void);
-sh2_Hal_t *dfu_hal_init(void);
-sh2_Hal_t *fsp200_dfu_hal_init(void);
-sh2_Hal_t *fsp201_hal_init(void);
-sh2_Hal_t *fsp201_dfu_hal_init(void);
+sh2_Hal_t *sh2_hal_init(void)
+{
+    // Get instance of uart hal suitable for SH2 on BNO08x
+    return shtp_uart_hal_init(&sh2_hal, false);
+}
 
-#endif
+sh2_Hal_t *dfu_hal_init(void)
+{
+    // Get instance of uart hal suitable for SH2 on BNO08x
+    return bno_dfu_uart_hal_init(&sh2_hal, true);
+}

@@ -1,5 +1,5 @@
 /*
- * Copyright 2017-2021 CEVA, Inc.
+ * Copyright 2022 CEVA, Inc.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License and 
@@ -16,19 +16,23 @@
  */
 
 /*
- * Declare init methods for sh2 HAL and DFU HAL.
+ * I2C HAL support
  */
 
-#ifndef SH2_HAL_INIT_H
-#define SH2_HAL_INIT_H
+#ifndef I2C_HAL_H
+#define I2C_HAL_H
 
 #include "sh2_hal.h"
+#include <stdbool.h>
 
-// Initialize the SHTP HAL and return a reference to it.
-sh2_Hal_t *sh2_hal_init(void);
-sh2_Hal_t *dfu_hal_init(void);
-sh2_Hal_t *fsp200_dfu_hal_init(void);
-sh2_Hal_t *fsp201_hal_init(void);
-sh2_Hal_t *fsp201_dfu_hal_init(void);
+typedef struct i2c_hal_s {
+    sh2_Hal_t sh2_hal;       // Must be first so we can cast (sh2_hal_t *) to (i2c_hal_t *)
+    bool dfu;
+    uint8_t i2c_addr;
+} i2c_hal_t;
+
+sh2_Hal_t *shtp_i2c_hal_init(i2c_hal_t *pHal, bool dfu, uint8_t addr);
+
+sh2_Hal_t *bno_dfu_i2c_hal_init(i2c_hal_t *pHal, bool dfu, uint8_t addr);
 
 #endif

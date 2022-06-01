@@ -19,6 +19,8 @@
  * SHTP UART-based HAL for SH2.
  */
 
+#include "uart_hal.h"
+
 #include "sh2_hal_init.h"
 #include "sh2_hal.h"
 #include "sh2_err.h"
@@ -88,10 +90,10 @@
 #define RESET_DELAY_US (10000)
 
 // Wait up to this long to see first interrupt from SH
-#define START_DELAY_US (2000000)
+#define START_DELAY_US (4000000)
 
 // Wait this long before assuming bootloader is ready
-#define DFU_BOOT_DELAY_US (50000)
+#define DFU_BOOT_DELAY_US (3000000)
 
 // ------------------------------------------------------------------------
 // Private types
@@ -147,15 +149,6 @@ static uint32_t txIndex = 0;           // index of next byte to be sent (of txFr
 
 // True between asserting reset and seeing first INTN assertion
 static volatile bool inReset;
-
-// SHTP UART HAL instance
-static sh2_Hal_t sh2Hal;
-
-// DFU UART HAL instance
-static sh2_Hal_t dfuHal;
-
-// FSP200 DFU UART HAL instance
-static sh2_Hal_t fsp200DfuHal;
 
 #ifdef USE_FSP200_SHTP_AUTOBAUD
 // FSP200 autobaud sequence
@@ -585,13 +578,15 @@ void usartError(UART_HandleTypeDef *huart)
 // ------------------------------------------------------------------------
 // SHTP UART HAL Methods
 
-static int sh2_uart_hal_open_aux(sh2_Hal_t *self, bool dfu)
+static int shtp_uart_hal_open(sh2_Hal_t *self_)
 {
+    uart_hal_t *self = (uart_hal_t *)self_;
+    
     if (isOpen)
     {
         return SH2_ERR;
     }
-    
+
     isOpen = true;
     
     // Assert reset
@@ -611,7 +606,7 @@ static int sh2_uart_hal_open_aux(sh2_Hal_t *self, bool dfu)
     ps1(true);
 
     // Use DFU flag to decide whether to go into DFU mode
-    bootn(!dfu);
+    bootn(!self->dfu);
 
     // Delay for RESET_DELAY_US to ensure reset takes effect
     delay_us(RESET_DELAY_US);
@@ -649,19 +644,7 @@ static int sh2_uart_hal_open_aux(sh2_Hal_t *self, bool dfu)
     return SH2_OK;
 }
 
-static int sh2_uart_hal_open(sh2_Hal_t *self)
-{
-    // Open for non-DFU case
-    return sh2_uart_hal_open_aux(self, false);
-}
-
-static int fsp200_dfu_uart_hal_open(sh2_Hal_t *self)
-{
-    // Open for DFU over SHTP case (FSP200)
-    return sh2_uart_hal_open_aux(self, true);
-}
-
-static void sh2_uart_hal_close(sh2_Hal_t *self)
+static void shtp_uart_hal_close(sh2_Hal_t *self)
 {
     disableInts();
     
@@ -681,7 +664,7 @@ static void sh2_uart_hal_close(sh2_Hal_t *self)
     isOpen = false;
 }
 
-static int sh2_uart_hal_read(sh2_Hal_t *self, uint8_t *pBuffer, unsigned len, uint32_t *t)
+static int shtp_uart_hal_read(sh2_Hal_t *self, uint8_t *pBuffer, unsigned len, uint32_t *t)
 {
     uint32_t stopPoint = sizeof(rxBuffer)-__HAL_DMA_GET_COUNTER(&hdma_usart1_rx);
     int retval = 0;
@@ -741,7 +724,7 @@ static int sh2_uart_hal_read(sh2_Hal_t *self, uint8_t *pBuffer, unsigned len, ui
     return retval;
 }
 
-static int sh2_uart_hal_write(sh2_Hal_t *self, uint8_t *pBuffer, unsigned len)
+static int shtp_uart_hal_write(sh2_Hal_t *self, uint8_t *pBuffer, unsigned len)
 {
     // Validate parameters
     if ((pBuffer == 0) || (len == 0)) {
@@ -772,7 +755,7 @@ static int sh2_uart_hal_write(sh2_Hal_t *self, uint8_t *pBuffer, unsigned len)
     return len;
 }
 
-static uint32_t sh2_uart_hal_getTimeUs(sh2_Hal_t *self)
+static uint32_t shtp_uart_hal_getTimeUs(sh2_Hal_t *self)
 {
     return timeNowUs();
 }
@@ -780,7 +763,7 @@ static uint32_t sh2_uart_hal_getTimeUs(sh2_Hal_t *self)
 // ------------------------------------------------------------------------
 // DFU UART HAL Methods
 
-static int dfu_uart_hal_open(sh2_Hal_t *self)
+static int bno_dfu_uart_hal_open(sh2_Hal_t *self)
 {
     if (isOpen)
     {
@@ -831,7 +814,7 @@ static int dfu_uart_hal_open(sh2_Hal_t *self)
     return SH2_OK;
 }
 
-static void dfu_uart_hal_close(sh2_Hal_t *self)
+static void bno_dfu_uart_hal_close(sh2_Hal_t *self)
 {
     disableInts();
     
@@ -851,7 +834,7 @@ static void dfu_uart_hal_close(sh2_Hal_t *self)
     isOpen = false;
 }
 
-static int dfu_uart_hal_read(sh2_Hal_t *self, uint8_t *pBuffer, unsigned len, uint32_t *t)
+static int bno_dfu_uart_hal_read(sh2_Hal_t *self, uint8_t *pBuffer, unsigned len, uint32_t *t)
 {
     uint32_t stopPoint = sizeof(rxBuffer)-__HAL_DMA_GET_COUNTER(&hdma_usart1_rx);
 
@@ -881,7 +864,7 @@ static int dfu_uart_hal_read(sh2_Hal_t *self, uint8_t *pBuffer, unsigned len, ui
     return 0;
 }
 
-static int dfu_uart_hal_write(sh2_Hal_t *self, uint8_t *pBuffer, unsigned len)
+static int bno_dfu_uart_hal_write(sh2_Hal_t *self, uint8_t *pBuffer, unsigned len)
 {
     // Validate parameters
     if ((pBuffer == 0) || (len == 0)) {
@@ -904,7 +887,7 @@ static int dfu_uart_hal_write(sh2_Hal_t *self, uint8_t *pBuffer, unsigned len)
     return len;
 }
 
-static uint32_t dfu_uart_hal_getTimeUs(sh2_Hal_t *self)
+static uint32_t bno_dfu_uart_hal_getTimeUs(sh2_Hal_t *self)
 {
     return timeNowUs();
 }
@@ -950,39 +933,33 @@ void EXTI15_10_IRQHandler(void)
 // ------------------------------------------------------------------------
 // Public methods
 
-sh2_Hal_t *sh2_hal_init(void)
+sh2_Hal_t *shtp_uart_hal_init(uart_hal_t *pHal, bool dfu)
 {
-    sh2Hal.open = sh2_uart_hal_open;
-    sh2Hal.close = sh2_uart_hal_close;
-    sh2Hal.read = sh2_uart_hal_read;
-    sh2Hal.write = sh2_uart_hal_write;
-    sh2Hal.getTimeUs = sh2_uart_hal_getTimeUs;
+    pHal->dfu = dfu;
 
-    return &sh2Hal;
-}
-
-sh2_Hal_t *dfu_hal_init(void)
-{
-    dfuHal.open = dfu_uart_hal_open;
-    dfuHal.close = dfu_uart_hal_close;
-    dfuHal.read = dfu_uart_hal_read;
-    dfuHal.write = dfu_uart_hal_write;
-    dfuHal.getTimeUs = dfu_uart_hal_getTimeUs;
-
-    return &dfuHal;
-}
-
-sh2_Hal_t *fsp200_dfu_hal_init(void)
-{
-    fsp200DfuHal.open = fsp200_dfu_uart_hal_open;
-    fsp200DfuHal.close = sh2_uart_hal_close;
-    fsp200DfuHal.read = sh2_uart_hal_read;
-    fsp200DfuHal.write = sh2_uart_hal_write;
-    fsp200DfuHal.getTimeUs = sh2_uart_hal_getTimeUs;
-
-    return &fsp200DfuHal;
-}
+    // Set up the HAL reference object for the client
+    pHal->sh2_hal.open = shtp_uart_hal_open;
+    pHal->sh2_hal.close = shtp_uart_hal_close;
+    pHal->sh2_hal.read = shtp_uart_hal_read;
+    pHal->sh2_hal.write = shtp_uart_hal_write;
+    pHal->sh2_hal.getTimeUs = shtp_uart_hal_getTimeUs;
     
+    return &pHal->sh2_hal;
+}
+
+sh2_Hal_t *bno_dfu_uart_hal_init(uart_hal_t *pHal, bool dfu)
+{
+    pHal->dfu = dfu;
+    
+    // Set up the HAL reference object for the client
+    pHal->sh2_hal.open = bno_dfu_uart_hal_open;
+    pHal->sh2_hal.close = bno_dfu_uart_hal_close;
+    pHal->sh2_hal.read = bno_dfu_uart_hal_read;
+    pHal->sh2_hal.write = bno_dfu_uart_hal_write;
+    pHal->sh2_hal.getTimeUs = bno_dfu_uart_hal_getTimeUs;
+
+    return &pHal->sh2_hal;
+}
 
 
 

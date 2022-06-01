@@ -1,5 +1,5 @@
 /*
- * Copyright 2017-2021 CEVA, Inc.
+ * Copyright 2018-21 CEVA, Inc.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License and 
@@ -16,19 +16,27 @@
  */
 
 /*
- * Declare init methods for sh2 HAL and DFU HAL.
+ * I2C HAL for BNO08x
  */
 
-#ifndef SH2_HAL_INIT_H
-#define SH2_HAL_INIT_H
+#include "i2c_hal.h"
 
-#include "sh2_hal.h"
+#define ADDR_SH2_0 (0x4A)
+#define ADDR_SH2_1 (0x4B)
+#define ADDR_BNODFU_0 (0x28)
+#define ADDR_BNODFU_1 (0x29)
 
-// Initialize the SHTP HAL and return a reference to it.
-sh2_Hal_t *sh2_hal_init(void);
-sh2_Hal_t *dfu_hal_init(void);
-sh2_Hal_t *fsp200_dfu_hal_init(void);
-sh2_Hal_t *fsp201_hal_init(void);
-sh2_Hal_t *fsp201_dfu_hal_init(void);
+i2c_hal_t sh2_hal;
+i2c_hal_t dfu_hal;
 
-#endif
+sh2_Hal_t *sh2_hal_init(void)
+{
+    // Get instance of i2c hal suitable for SH2 on BNO08x
+    return shtp_i2c_hal_init(&sh2_hal, false, ADDR_SH2_0);
+}
+
+sh2_Hal_t *dfu_hal_init(void)
+{
+    // Get instance of i2c hal suitable for SH2 on BNO08x
+    return bno_dfu_i2c_hal_init(&sh2_hal, true, ADDR_BNODFU_0);
+}

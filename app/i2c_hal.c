@@ -19,6 +19,8 @@
  * I2C-based HALs for SH2 and DFU.
  */
 
+#include "i2c_hal.h"
+
 #include "sh2_hal_init.h"
 #include "sh2_hal.h"
 #include "sh2_err.h"
@@ -54,10 +56,10 @@
 #define RESET_DELAY_US (10000)
 
 // Wait up to this long to see first interrupt from SH
-#define START_DELAY_US (2000000)
+#define START_DELAY_US (4000000) // (2000000)
 
 // Wait this long before assuming bootloader is ready
-#define DFU_BOOT_DELAY_US (50000)
+#define DFU_BOOT_DELAY_US (3000000) // (50000)
 
 // How many bytes to read when reading the length field
 #define READ_LEN (2)
@@ -76,11 +78,7 @@ enum BusState_e {
     BUS_WRITING_DFU,
 };
 
-#define ADDR_SH2_0 (0x4A)
-#define ADDR_SH2_1 (0x4B)
 
-#define ADDR_DFU_0 (0x28)
-#define ADDR_DFU_1 (0x29)
 
 // ------------------------------------------------------------------------
 // Private data
@@ -114,9 +112,6 @@ static uint16_t i2cAddr;
 
 // True between asserting reset and seeing first INTN assertion
 static volatile bool inReset;
-
-static sh2_Hal_t sh2Hal;
-static sh2_Hal_t dfuHal;
 
 // ------------------------------------------------------------------------
 // Private methods
@@ -432,15 +427,18 @@ void I2C1_ER_IRQHandler(void)
 // ------------------------------------------------------------------------
 // SH2 HAL Methods
 
-static int sh2_i2c_hal_open(sh2_Hal_t *self)
+static int shtp_i2c_hal_open(sh2_Hal_t *self_)
 {
+    // cast sh2_hal_t pointer to i2c_hal_t
+    i2c_hal_t *self = (i2c_hal_t *)self_;
+    
     if (isOpen)
     {
         return SH2_ERR;
     }
 
     i2cBusState = BUS_INIT;
-    i2cAddr = ADDR_SH2_0 << 1;
+    i2cAddr = self->i2c_addr << 1;
 
     isOpen = true;
 
@@ -472,7 +470,7 @@ static int sh2_i2c_hal_open(sh2_Hal_t *self)
     ps1(false);
 
     // Deassert BOOT, don't go into bootloader
-    bootn(true);
+    bootn(!self->dfu);
     
     // Deassert reset
     rstn(1);
@@ -483,7 +481,26 @@ static int sh2_i2c_hal_open(sh2_Hal_t *self)
     return SH2_OK;
 }
 
-static void sh2_i2c_hal_close(sh2_Hal_t *self)
+#if 0
+
+static int sh2_i2c_hal_open(sh2_Hal_t *self)
+{
+    return sh2_i2c_hal_open_aux(self, false, ADDR_SH2_0);
+}
+
+static int fsp201_i2c_hal_open(sh2_Hal_t *self)
+{
+    return sh2_i2c_hal_open_aux(self, false, ADDR_FSP201_0);
+}
+
+static int fsp201_dfu_i2c_hal_open(sh2_Hal_t *self)
+{
+    return sh2_i2c_hal_open_aux(self, true, ADDR_FSP201_0);
+}
+
+#endif
+
+static void shtp_i2c_hal_close(sh2_Hal_t *self_)
 {
     // Hold sensor hub in reset
     rstn(false);
@@ -503,7 +520,7 @@ static void sh2_i2c_hal_close(sh2_Hal_t *self)
     isOpen = false;
 }
 
-static int sh2_i2c_hal_read(sh2_Hal_t *self, uint8_t *pBuffer, unsigned len, uint32_t *t)
+static int shtp_i2c_hal_read(sh2_Hal_t *self_, uint8_t *pBuffer, unsigned len, uint32_t *t)
 {
     int retval = 0;
     
@@ -549,7 +566,7 @@ static int sh2_i2c_hal_read(sh2_Hal_t *self, uint8_t *pBuffer, unsigned len, uin
     return retval;
 }
 
-static int sh2_i2c_hal_write(sh2_Hal_t *self, uint8_t *pBuffer, unsigned len)
+static int shtp_i2c_hal_write(sh2_Hal_t *self, uint8_t *pBuffer, unsigned len)
 {
     int retval = 0;
     
@@ -579,7 +596,7 @@ static int sh2_i2c_hal_write(sh2_Hal_t *self, uint8_t *pBuffer, unsigned len)
     return retval;
 }
 
-static uint32_t sh2_i2c_hal_getTimeUs(sh2_Hal_t *self)
+static uint32_t shtp_i2c_hal_getTimeUs(sh2_Hal_t *self)
 {
     return timeNowUs();
 }
@@ -587,15 +604,18 @@ static uint32_t sh2_i2c_hal_getTimeUs(sh2_Hal_t *self)
 // ------------------------------------------------------------------------
 // DFU HAL Methods
 
-static int dfu_i2c_hal_open(sh2_Hal_t *self)
+static int bno_dfu_i2c_hal_open(sh2_Hal_t *self_)
 {
+    // cast sh2_hal_t pointer to i2c_hal_t
+    i2c_hal_t *self = (i2c_hal_t *)self_;
+    
     if (isOpen)
     {
         return SH2_ERR;
     }
 
     i2cBusState = BUS_INIT;
-    i2cAddr = ADDR_DFU_0 << 1;
+    i2cAddr = self->i2c_addr << 1;
     isOpen = true;
 
     // Init hardware peripherals
@@ -636,7 +656,7 @@ static int dfu_i2c_hal_open(sh2_Hal_t *self)
     return SH2_OK;
 }
 
-static void dfu_i2c_hal_close(sh2_Hal_t *self)
+static void bno_dfu_i2c_hal_close(sh2_Hal_t *self)
 {
     // Hold sensor hub in reset, for dfu
     rstn(false);
@@ -653,7 +673,7 @@ static void dfu_i2c_hal_close(sh2_Hal_t *self)
     isOpen = false;
 }
 
-static int dfu_i2c_hal_read(sh2_Hal_t *self, uint8_t *pBuffer, unsigned len, uint32_t *t)
+static int bno_dfu_i2c_hal_read(sh2_Hal_t *self, uint8_t *pBuffer, unsigned len, uint32_t *t)
 {
     int retval = 0;
     
@@ -690,7 +710,7 @@ static int dfu_i2c_hal_read(sh2_Hal_t *self, uint8_t *pBuffer, unsigned len, uin
     return retval;
 }
 
-static int dfu_i2c_hal_write(sh2_Hal_t *self, uint8_t *pBuffer, unsigned len)
+static int bno_dfu_i2c_hal_write(sh2_Hal_t *self, uint8_t *pBuffer, unsigned len)
 {
     int retval = 0;
     
@@ -719,11 +739,12 @@ static int dfu_i2c_hal_write(sh2_Hal_t *self, uint8_t *pBuffer, unsigned len)
     return retval;
 }
 
-static uint32_t dfu_i2c_hal_getTimeUs(sh2_Hal_t *self)
+static uint32_t bno_dfu_i2c_hal_getTimeUs(sh2_Hal_t *self)
 {
     return timeNowUs();
 }
 
+#if 0
 // ------------------------------------------------------------------------
 // Public methods
 
@@ -739,14 +760,67 @@ sh2_Hal_t *sh2_hal_init(void)
     return &sh2Hal;
 }
 
-sh2_Hal_t *dfu_hal_init(void)
+sh2_Hal_t *bno_dfu_hal_init(void)
 {
     // Set up the HAL reference object for the client
-    dfuHal.open = dfu_i2c_hal_open;
-    dfuHal.close = dfu_i2c_hal_close;
-    dfuHal.read = dfu_i2c_hal_read;
-    dfuHal.write = dfu_i2c_hal_write;
-    dfuHal.getTimeUs = dfu_i2c_hal_getTimeUs;
+    bnoDfuHal.open = bno_dfu_i2c_hal_open;
+    bnoDfuHal.close = bno_dfu_i2c_hal_close;
+    bnoDfuHal.read = bno_dfu_i2c_hal_read;
+    bnoDfuHal.write = bno_dfu_i2c_hal_write;
+    bnoDfuHal.getTimeUs = bno_dfu_i2c_hal_getTimeUs;
 
-    return &dfuHal;
+    return &bnoDfuHal;
 }
+
+sh2_Hal_t *fsp201_hal_init(void)
+{
+    fsp201Hal.open = fsp201_i2c_hal_open;
+    fsp201Hal.close = sh2_i2c_hal_close;
+    fsp201Hal.read = sh2_i2c_hal_read;
+    fsp201Hal.write = sh2_i2c_hal_write;
+    fsp201Hal.getTimeUs = sh2_i2c_hal_getTimeUs;
+
+    return &fsp201Hal;
+}
+
+sh2_Hal_t *fsp201_dfu_hal_init(void)
+{
+    fsp201DfuHal.open = fsp201_dfu_i2c_hal_open;
+    fsp201DfuHal.close = sh2_i2c_hal_close;
+    fsp201DfuHal.read = sh2_i2c_hal_read;
+    fsp201DfuHal.write = sh2_i2c_hal_write;
+    fsp201DfuHal.getTimeUs = sh2_i2c_hal_getTimeUs;
+
+    return &fsp201DfuHal;
+}
+#endif
+
+sh2_Hal_t *shtp_i2c_hal_init(i2c_hal_t *pHal, bool dfu, uint8_t addr)
+{
+    pHal->dfu = dfu;
+    pHal->i2c_addr = addr;
+
+    pHal->sh2_hal.open = shtp_i2c_hal_open;
+    pHal->sh2_hal.close = shtp_i2c_hal_close;
+    pHal->sh2_hal.read = shtp_i2c_hal_read;
+    pHal->sh2_hal.write = shtp_i2c_hal_write;
+    pHal->sh2_hal.getTimeUs = shtp_i2c_hal_getTimeUs;
+
+    return &pHal->sh2_hal;
+}
+
+sh2_Hal_t *bno_dfu_i2c_hal_init(i2c_hal_t *pHal, bool dfu, uint8_t addr)
+{
+    pHal->dfu = dfu;
+    pHal->i2c_addr = addr;
+    
+    // Set up the HAL reference object for the client
+    pHal->sh2_hal.open = bno_dfu_i2c_hal_open;
+    pHal->sh2_hal.close = bno_dfu_i2c_hal_close;
+    pHal->sh2_hal.read = bno_dfu_i2c_hal_read;
+    pHal->sh2_hal.write = bno_dfu_i2c_hal_write;
+    pHal->sh2_hal.getTimeUs = bno_dfu_i2c_hal_getTimeUs;
+
+    return &pHal->sh2_hal;
+}
+

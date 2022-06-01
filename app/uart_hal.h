@@ -1,5 +1,5 @@
 /*
- * Copyright 2017-2021 CEVA, Inc.
+ * Copyright 2022 CEVA, Inc.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License and 
@@ -16,19 +16,22 @@
  */
 
 /*
- * Declare init methods for sh2 HAL and DFU HAL.
+ * UART HAL support
  */
 
-#ifndef SH2_HAL_INIT_H
-#define SH2_HAL_INIT_H
+#ifndef UART_HAL_H
+#define UART_HAL_H
 
 #include "sh2_hal.h"
+#include <stdbool.h>
 
-// Initialize the SHTP HAL and return a reference to it.
-sh2_Hal_t *sh2_hal_init(void);
-sh2_Hal_t *dfu_hal_init(void);
-sh2_Hal_t *fsp200_dfu_hal_init(void);
-sh2_Hal_t *fsp201_hal_init(void);
-sh2_Hal_t *fsp201_dfu_hal_init(void);
+typedef struct uart_hal_s {
+    sh2_Hal_t sh2_hal;       // Must be first so we can cast (sh2_hal_t *) to (uart_hal_t *)
+    bool dfu;
+} uart_hal_t;
+
+sh2_Hal_t *shtp_uart_hal_init(uart_hal_t *pHal, bool dfu);
+
+sh2_Hal_t *bno_dfu_uart_hal_init(uart_hal_t *pHal, bool dfu);
 
 #endif

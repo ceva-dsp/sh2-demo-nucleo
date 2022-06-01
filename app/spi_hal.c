@@ -23,7 +23,6 @@
 
 #include "sh2_hal.h"
 #include "sh2_err.h"
-#include "dbg.h"
 
 #include <stdint.h>
 #include <stdbool.h>
@@ -399,7 +398,6 @@ static void spiCompleted(void)
         else
         {
             // No SHTP payload was received, this operation is done
-            dbg_pulse(1);
             csn(true);            // deassert CSN
             rxBufLen = 0;         // no rx data available
             spiState = SPI_IDLE;  // back to idle state

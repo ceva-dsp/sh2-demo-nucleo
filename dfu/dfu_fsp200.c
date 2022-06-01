@@ -28,7 +28,7 @@
 #include "shtp.h"
 #include "sh2_hal.h"
 #include "sh2_hal_init.h"
-#include "firmware-fsp200.h"
+#include "firmware.h"
 
 #define CHAN_BOOTLOADER_CONTROL    (1)
 
@@ -99,21 +99,26 @@ typedef enum {
 // States of DFU process
 typedef enum {
     ST_INIT,
+    ST_GETTING_VER,
     ST_SETTING_MODE,
+    ST_WAIT_STATUS,
     ST_SENDING_DATA,
     ST_WAIT_COMPLETION,
     ST_LAUNCHING,
     ST_FINISHED,
 } DfuState_t;
 
-// DFU State machine Action typedef
-typedef DfuState_t (*DfuAction_t)(uint8_t *payload, uint16_t len);
+// DFU State machine message handler typedef
+typedef DfuState_t (*DfuMsgHdlr_t)(uint8_t *payload, uint16_t len);
 
-// DFU State machine transition typedef
+// DFU State machine timeout handler typedef
+typedef DfuState_t (*DfuTimeoutHdlr_t)(void);
+
+// DFU State machine state info
 typedef struct {
-    DfuState_t state;
-    uint8_t reportId;
-    DfuAction_t action;
+    DfuMsgHdlr_t msgHdlr;
+    DfuTimeoutHdlr_t timeoutHdlr;
+    uint32_t maxTime_us;
 } DfuTransition_t;
 
 // DFU data
@@ -131,6 +136,7 @@ typedef struct {
 
     uint32_t ignoredResponses;
 
+    uint32_t intervalStart_us;
     DfuState_t state;
 } Dfu_t;
 
@@ -154,6 +160,8 @@ static void initState(void)
 
     dfu_.ignoredResponses = 0;
 
+    uint32_t now_us = dfu_.pHal->getTimeUs(dfu_.pHal);
+    dfu_.intervalStart_us = now_us;
     dfu_.state = ST_INIT;
 }
 
@@ -174,24 +182,26 @@ static void openFirmware()
     dfu_.firmwareOpened = true;
 
     // Validate firmware matches this implementation
-    const char *s = dfu_.firmware->getMeta("FW-Format");
-    if ((s == 0) || (strcmp(s, "EFM32_V1") != 0)) {
-        // No format info or Incorrect format
+    const char *fmt = dfu_.firmware->getMeta("FW-Format");
+    const char *pn = dfu_.firmware->getMeta("SW-Part-Number");
+    if ((fmt == 0) || (pn == 0)) {
+        // missing format or part number
         dfu_.status = SH2_ERR_BAD_PARAM;
         return;
     }
-
-    // Validate firmware is for the right part number
-    s = dfu_.firmware->getMeta("SW-Part-Number");
-    if (s == 0) {
-        // No part number info
-        dfu_.status = SH2_ERR_BAD_PARAM;
-        return;
+    
+    if ((strcmp(fmt, "EFM32_V1") == 0) && 
+        (strcmp(pn, "1000-4095") == 0)) {
+           // valid FSP200 firmware
     }
-    if (strcmp(s, "1000-4095") != 0) {
-        // Incorrect part number
+    else if ((strcmp(fmt, "RA2L1_V1") == 0) && 
+             (strcmp(pn, "1000-4818") == 0)) {
+            // valid FSP201 Firmware
+    }
+    else {
+        // Invalid values for format and/or part number
         dfu_.status = SH2_ERR_BAD_PARAM;
-        return;
+        return;   
     }
 
     // Validate firmware length
@@ -232,6 +242,20 @@ static uint16_t getU16(uint8_t *payload, unsigned offset)
     return value;
 }
 
+static uint8_t getU8(uint8_t *payload, unsigned offset)
+{
+    uint16_t value = 0;
+
+    value = payload[offset];
+
+    return value;
+}
+
+typedef struct {
+    uint8_t reportId;
+    uint8_t reserved1;
+} OpProdIdRequest_t;
+
 typedef struct {
     uint8_t reportId;
     uint8_t opMode;
@@ -247,23 +271,57 @@ static void requestUpgrade(void)
     shtp_send(dfu_.pShtp, CHAN_BOOTLOADER_CONTROL, (uint8_t *)&req, sizeof(req));
 }
 
+static void requestProdId(void)
+{
+    OpProdIdRequest_t req;
+
+    req.reportId = ID_PRODID_REQ;
+    req.reserved1 = 0;
+    
+    shtp_send(dfu_.pShtp, CHAN_BOOTLOADER_CONTROL, (uint8_t *)&req, sizeof(req));
+}
+
 static DfuState_t handleInitStatus(uint8_t *payload, uint16_t len)
 {
+    // Only process ID_STATUS_RESP
+    uint8_t reportId = payload[0];
+    if (reportId != ID_STATUS_RESP) return dfu_.state;
+    
     DfuState_t nextState = dfu_.state;
     uint32_t status = getU32(payload, 4);
     uint32_t errCode = getU32(payload, 8);
 
     // Make sure status says we can proceed.
     if (status & STATUS_LAUNCH_BOOTLOADER) {
-        // Issue request to start download
-        requestUpgrade();
-        nextState = ST_SETTING_MODE;
+        // Issue request for product id
+        requestProdId();
+        nextState = ST_GETTING_VER;
     }
     else {
         // Can't start
         dfu_.status = SH2_ERR_HUB;
         nextState = ST_FINISHED;
     }
+    
+    return nextState;
+}
+
+static DfuState_t handleProdId(uint8_t *payload, uint16_t len)
+{
+    // Only process ID_STATUS_RESP
+    uint8_t reportId = payload[0];
+    if (reportId != ID_PRODID_RESP) return dfu_.state;
+    
+    DfuState_t nextState = dfu_.state;
+    volatile uint32_t part_number = getU32(payload, 4);
+    volatile uint8_t  ver_major = getU8(payload, 8);
+    volatile uint8_t  ver_minor = getU8(payload, 9);
+    volatile uint16_t ver_patch = getU16(payload, 10);
+    volatile uint32_t build_num = getU32(payload, 12);
+        
+    // Issue request to start download
+    requestUpgrade();
+    nextState = ST_SETTING_MODE;
     
     return nextState;
 }
@@ -292,11 +350,16 @@ static void requestWrite(void)
     req.wordOffset_msb = (dfu_.wordOffset >>8) & 0xFF;
     dfu_.firmware->getAppData(req.data, dfu_.wordOffset*4, dfu_.writeLen*4);
     
-    shtp_send(dfu_.pShtp, CHAN_BOOTLOADER_CONTROL, (uint8_t *)&req, sizeof(req));
+    int writeLen = dfu_.writeLen*4 + 4;
+    shtp_send(dfu_.pShtp, CHAN_BOOTLOADER_CONTROL, (uint8_t *)&req, writeLen);
 }
 
 static DfuState_t handleModeResponse(uint8_t *payload, uint16_t len)
 {
+    // Only process mode reponse
+    uint8_t reportId = payload[0];
+    if (reportId != ID_OPMODE_RESP) return dfu_.state;
+    
     DfuState_t nextState = dfu_.state;
     uint8_t opMode = payload[1];
     uint8_t opModeStatus = payload[2];
@@ -304,6 +367,32 @@ static DfuState_t handleModeResponse(uint8_t *payload, uint16_t len)
     // Make sure transition to upgrade mode succeeded
     if ((opMode == OPMODE_UPGRADE) &&
         (opModeStatus == 0)) {
+        nextState = ST_WAIT_STATUS;
+    }
+    else {
+        // Failed to start upgrade mode
+        dfu_.status = SH2_ERR_HUB;
+        nextState = ST_FINISHED;
+    }
+    
+    return nextState;
+}
+
+static DfuState_t handleUpgradeStatusResponse(uint8_t *payload, uint16_t len)
+{
+    // Only process status reponse
+    uint8_t reportId = payload[0];
+    if (reportId != ID_STATUS_RESP) return dfu_.state;
+    
+    DfuState_t nextState = dfu_.state;
+    uint8_t opMode = payload[1];
+    uint32_t status = getU32(payload, 4);
+    uint32_t error = getU32(payload, 8);
+
+    // Make sure transition to upgrade mode succeeded
+    if ((opMode == OPMODE_UPGRADE) &&
+        ((status&0x0FFFFFFF) == STATUS_UPGRADE_STARTED) &&
+        (error == 0)) {
         dfu_.wordOffset = 0;
         requestWrite();
         nextState = ST_SENDING_DATA;
@@ -319,6 +408,10 @@ static DfuState_t handleModeResponse(uint8_t *payload, uint16_t len)
 
 static DfuState_t handleWriteResponse(uint8_t *payload, uint16_t len)
 {
+    // Only process mode reponse
+    uint8_t reportId = payload[0];
+    if (reportId != ID_WRITE_RESP) return dfu_.state;
+    
     DfuState_t nextState = dfu_.state;
     uint8_t writeStatus = payload[1];
     uint16_t wordOffset = getU16(payload, 2);
@@ -356,6 +449,10 @@ static void requestLaunch(void)
 
 static DfuState_t handleFinalStatus(uint8_t *payload, uint16_t len)
 {
+    // Only process mode reponse
+    uint8_t reportId = payload[0];
+    if (reportId != ID_STATUS_RESP) return dfu_.state;
+    
     DfuState_t nextState = dfu_.state;
 
     uint32_t status = getU32(payload, 4);
@@ -378,6 +475,10 @@ static DfuState_t handleFinalStatus(uint8_t *payload, uint16_t len)
 
 static DfuState_t handleLaunchResp(uint8_t *payload, uint16_t len)
 {
+    // Only process mode reponse
+    uint8_t reportId = payload[0];
+    if (reportId != ID_OPMODE_RESP) return dfu_.state;
+    
     DfuState_t nextState = dfu_.state;
 
     uint8_t opMode = payload[1];
@@ -396,43 +497,64 @@ static DfuState_t handleLaunchResp(uint8_t *payload, uint16_t len)
     return nextState;
 }
 
-DfuTransition_t dfuStateTransition[] = {
-    {ST_INIT, ID_STATUS_RESP, handleInitStatus},
-    {ST_SETTING_MODE, ID_OPMODE_RESP, handleModeResponse},
-    {ST_SENDING_DATA, ID_WRITE_RESP, handleWriteResponse},
-    {ST_WAIT_COMPLETION, ID_STATUS_RESP, handleFinalStatus},
-    {ST_LAUNCHING, ID_OPMODE_RESP, handleLaunchResp},
-};
-
-static DfuTransition_t *findTransition(DfuState_t state, uint8_t reportId)
+static DfuState_t handleLaunchTimeout()
 {
-    for (int n = 0; n < sizeof(dfuStateTransition)/sizeof(dfuStateTransition[0]); n++) {
-        if ((dfuStateTransition[n].state == state) &&
-            (dfuStateTransition[n].reportId == reportId)) {
-            // Found the entry for this state, reportId
-            return &dfuStateTransition[n];
-        }
-    }
+    // It's OK if we don't get launch confirmation.  Since we didn't
+    // see a definite failure before the timeout, assume it succeeded
+    // and application was launched.
+    dfu_.status = SH2_OK;
 
-    // Didn't find a match
-    return 0;
+    return ST_FINISHED;
 }
+
+static DfuState_t handleFinishedResp(uint8_t *payload, uint16_t len)
+{
+    // Does nothing, ignores messages.
+    return dfu_.state;
+}
+
+static DfuState_t handleGeneralTimeout()
+{
+    // Timeouts are generally failures
+    dfu_.status = SH2_ERR_TIMEOUT;
+    return ST_FINISHED;
+}
+
+DfuTransition_t dfuStates[] = {
+    {handleInitStatus, handleGeneralTimeout, 0},                // ST_INIT
+    {handleProdId, handleGeneralTimeout, 10000},                // ST_GETTING_VER
+    {handleModeResponse, handleGeneralTimeout, 10000},          // ST_SETTING_MODE
+    {handleUpgradeStatusResponse, handleGeneralTimeout, 10000}, // ST_WAIT_STATUS
+    {handleWriteResponse, handleGeneralTimeout, 2000000},       // ST_SENDING_DATA
+    {handleFinalStatus, handleGeneralTimeout, 500000},          // ST_WAIT_COMPLETION
+    {handleLaunchResp, handleLaunchTimeout, 100000},            // ST_LAUNCHING
+    {handleFinishedResp, handleGeneralTimeout, 0}               // ST_FINISHED
+};
 
 static void hdlr(void *cookie, uint8_t *payload, uint16_t len, uint32_t timestamp)
 {
-    uint8_t reportId = payload[0];
+    // Find entry for the current state.
+    DfuTransition_t *tr = &dfuStates[dfu_.state];
+    
+    // Pass this message through state-specific handler
+    dfu_.state = tr->msgHdlr(payload, len);
+    
+    // reset timeout logic
+    uint32_t now_us = dfu_.pHal->getTimeUs(dfu_.pHal);
+    dfu_.intervalStart_us = now_us;
+}
 
-    // Find a state machine table entry matching current state and report id.
-    DfuTransition_t *pEntry = findTransition(dfu_.state, reportId);
-
-    if (pEntry) {
-        // Take the prescribed action for this transition and assign new state
-        dfu_.state = pEntry->action(payload, len);
-    }
-    else {
-        // Unexpected event/state combination.  Ignore.
-        dfu_.ignoredResponses++;
-    }
+static void timeout()
+{
+    // Find entry for the current state.
+    DfuTransition_t *tr = &dfuStates[dfu_.state];
+    
+    // Pass this message through state-specific handler
+    dfu_.state = tr->timeoutHdlr();
+    
+    // reset timeout logic
+    uint32_t now_us = dfu_.pHal->getTimeUs(dfu_.pHal);
+    dfu_.intervalStart_us = now_us;
 }
 
 // ------------------------------------------------------------------------
@@ -443,18 +565,18 @@ int dfu(void)
     uint32_t start_us;
     uint32_t now_us;
 
+    // Create the HAL instance used for DFU.
+    dfu_.pHal = dfu_hal_init();
+    
     // Initialize state
     initState();
-
+    
     // Open firmware and validate it
     dfu_.firmware = &firmware;
     openFirmware();
     if (dfu_.status != SH2_OK) {
         goto fin;
     }
-
-    // Create the HAL instance used for DFU.
-    dfu_.pHal = fsp200_dfu_hal_init();
     
     // Initialize SHTP layer
     dfu_.pShtp = shtp_open(dfu_.pHal);
@@ -468,6 +590,15 @@ int dfu(void)
     while (((now_us - start_us) < DFU_TIMEOUT_US) &&
            (dfu_.state != ST_FINISHED))
     {
+        DfuState_t state = dfu_.state;
+        uint32_t maxTime_us = dfuStates[state].maxTime_us;
+        
+        if ((maxTime_us > 0) &&
+            (maxTime_us <= (now_us - dfu_.intervalStart_us))) {
+            // A timeout event has occurred.
+            timeout();
+        }
+        
         shtp_service(dfu_.pShtp);
         now_us = dfu_.pHal->getTimeUs(dfu_.pHal);
     }

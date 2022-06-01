@@ -23,7 +23,7 @@
 #include <stdbool.h>
 
 #include "dfu.h"
-#include "firmware-bno.h"
+#include "firmware.h"
 #include "sh2_hal.h"
 #include "sh2_err.h"
 #include "sh2_hal_init.h"

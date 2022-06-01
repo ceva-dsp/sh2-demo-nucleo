@@ -13,6 +13,15 @@
 /EWARM/demo-rvc
 /EWARM/fsp200-dfu
 /EWARM/fsp200-cal
+/EWARM/bno08x-i2c
+/EWARM/bno08x-spi
+/EWARM/bno08x-uart
+/EWARM/fsp201-dfu-i2c
+/EWARM/fsp201-i2c
+/EWARM/fsp20x-uart
+/EWARM/fsp201-i2c-cal
+/EWARM/fsp20x-uart-cal
+
 /EWARM/sh2-demo Configuration/
 /EWARM/settings/
 /EWARM/sh2-demo.dep
