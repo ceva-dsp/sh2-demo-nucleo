@@ -106,50 +106,62 @@ static void configShakeDetector(void)
 
 #endif
 
+static void delayUs(uint32_t t)
+{
+    uint32_t now_us = pSh2Hal->getTimeUs(pSh2Hal);
+    uint32_t start_us = now_us;
+
+    while (t > (now_us - start_us))
+    {
+        now_us = pSh2Hal->getTimeUs(pSh2Hal);
+    }
+}
+
 // Configure one sensor to produce periodic reports
 static void startReports()
 {
-    static sh2_SensorConfig_t config;
     int status;
-    int sensorId;
-    static const int enabledSensors[] =
+
+    // Each entry of sensorConfig[] represents one sensor to be configured in the loop below
+    static const struct {
+        int sensorId;
+        sh2_SensorConfig_t config;
+    } sensorConfig[] =
     {
-        SH2_GAME_ROTATION_VECTOR,
-        // SH2_RAW_ACCELEROMETER,
-        // SH2_RAW_GYROSCOPE,
-        // SH2_ROTATION_VECTOR,
-        // SH2_GYRO_INTEGRATED_RV,
-        // SH2_IZRO_MOTION_REQUEST,
-        // SH2_SHAKE_DETECTOR,
+        // Game Rotation Vector, 100Hz
+        {SH2_GAME_ROTATION_VECTOR, {.reportInterval_us = 10000}},
+
+        // Stability Detector, 100 Hz, changeSensitivityEnabled
+        // {SH2_STABILITY_DETECTOR, {.reportInterval_us = 10000, .changeSensitivity = true}},
+
+        // Raw accel, 100 Hz
+        // {SH2_RAW_ACCELEROMETER, {.reportInterval_us = 10000}},
+
+        // Raw gyroscope, 100 Hz
+        // {SH2_RAW_GYROSCOPE, {.reportInterval_us = 10000}},
+
+        // Rotation Vector, 100 Hz
+        // {SH2_ROTATION_VECTOR, {.reportInterval_us = 10000}},
+
+        // Gyro Integrated Rotation Vector, 100 Hz
+        // {SH2_GYRO_INTEGRATED_RV, {.reportInterval_us = 10000}},
+
+        // Motion requests for Interactive Zero Reference Offset cal
+        // {SH2_IZRO_MOTION_REQUEST, {.reportInterval_us = 10000}},
+
+        // Shake detector
+        // {SH2_SHAKE_DETECTOR, {.reportInterval_us = 10000}},
     };
 
-    // These sensor options are disabled or not used in most cases
-    config.changeSensitivityEnabled = false;
-    config.wakeupEnabled = false;
-    config.changeSensitivityRelative = false;
-    config.alwaysOnEnabled = false;
-    config.sniffEnabled = false;
-    config.changeSensitivity = 0;
-    config.batchInterval_us = 0;
-    config.sensorSpecific = 0;
-
-    // Select a report interval.
-    // config.reportInterval_us = 100000;  // microseconds (10 Hz)
-    // config.reportInterval_us = 40000;  // microseconds (25 Hz)
-    config.reportInterval_us = 10000;  // microseconds (100 Hz)
-    // config.reportInterval_us = 2500;   // microseconds (400 Hz)
-    // config.reportInterval_us = 1000;   // microseconds (1000 Hz)
-
-    for (int n = 0; n < ARRAY_LEN(enabledSensors); n++)
+    for (int n = 0; n < ARRAY_LEN(sensorConfig); n++)
     {
-        // Configure the sensor hub to produce these reports
-        sensorId = enabledSensors[n];
-        status = sh2_setSensorConfig(sensorId, &config);
+        int sensorId = sensorConfig[n].sensorId;
+
+        status = sh2_setSensorConfig(sensorId, &sensorConfig[n].config);
         if (status != 0) {
             printf("Error while enabling sensor %d\n", sensorId);
         }
     }
-    
 }
 
 // Handle non-sensor events from the sensor hub
@@ -158,6 +170,15 @@ static void eventHandler(void * cookie, sh2_AsyncEvent_t *pEvent)
     // If we see a reset, set a flag so that sensors will be reconfigured.
     if (pEvent->eventId == SH2_RESET) {
         resetOccurred = true;
+    }
+    else if (pEvent->eventId == SH2_SHTP_EVENT) {
+        printf("EventHandler  id:SHTP, %d\n", pEvent->shtpEvent);
+    }
+    else if (pEvent->eventId == SH2_GET_FEATURE_RESP) {
+        printf("EventHandler id:Sensor Config, %d\n", pEvent->sh2SensorConfigResp.sensorId);
+    }
+    else {
+        printf("EventHandler, unknown event Id: %d\n", pEvent->eventId);
     }
 }
 
@@ -304,16 +325,6 @@ static void printDsf(const sh2_SensorEvent_t * event)
 }
 #endif
 
-static void delayUs(uint32_t t)
-{
-    uint32_t now_us = pSh2Hal->getTimeUs(pSh2Hal);
-    uint32_t start_us = now_us;
-
-    while (t > (now_us - start_us))
-    {
-        now_us = pSh2Hal->getTimeUs(pSh2Hal);
-    }
-}
 
 #ifndef DSF_OUTPUT
 // Read product ids with version info from sensor hub and print them
@@ -362,11 +373,12 @@ static void printEvent(const sh2_SensorEvent_t * event)
     t = value.timestamp / 1000000.0;  // time in seconds.
     switch (value.sensorId) {
         case SH2_RAW_ACCELEROMETER:
-            printf("%8.4f Raw acc: %d %d %d\n",
+            printf("%8.4f Raw acc: %d %d %d time_us:%d\n",
                    t,
                    value.un.rawAccelerometer.x,
                    value.un.rawAccelerometer.y,
-                   value.un.rawAccelerometer.z);
+                   value.un.rawAccelerometer.z,
+                   value.un.rawAccelerometer.timestamp);
             break;
 
         case SH2_ACCELEROMETER:
@@ -458,6 +470,14 @@ static void printEvent(const sh2_SensorEvent_t * event)
                    (value.un.shakeDetector.shake & SHAKE_Y) ? 'Y' : '.',
                    (value.un.shakeDetector.shake & SHAKE_Z) ? 'Z' : '.');
 
+            break;
+        case SH2_STABILITY_CLASSIFIER:
+            printf("Stability Classification: %d\n",
+                   value.un.stabilityClassifier.classification);
+            break;
+        case SH2_STABILITY_DETECTOR:
+            printf("Stability Detector: %d\n",
+                   value.un.stabilityDetector.stability);
             break;
         default:
             printf("Unknown sensor: %d\n", value.sensorId);
