@@ -132,7 +132,7 @@ static void startReports()
         {SH2_GAME_ROTATION_VECTOR, {.reportInterval_us = 10000}},
 
         // Stability Detector, 100 Hz, changeSensitivityEnabled
-        // {SH2_STABILITY_DETECTOR, {.reportInterval_us = 10000, .changeSensitivity = true}},
+        // {SH2_STABILITY_DETECTOR, {.reportInterval_us = 10000, .changeSensitivityEnabled = true}},
 
         // Raw accel, 100 Hz
         // {SH2_RAW_ACCELEROMETER, {.reportInterval_us = 10000}},

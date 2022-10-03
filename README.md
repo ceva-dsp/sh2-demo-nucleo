@@ -23,7 +23,7 @@ module.
 ## Setup
 
 Clone this repository using the --recursive flag with git:
-  * git clone --recursive https://github.com/hcrest/sh2-demo-nucleo.git
+  * git clone --recursive https://github.com/ceva-dsp/sh2-demo-nucleo.git
 
 ## Building the Code
 * Use IAR EWARM to open the workspace, sh2-demo-nucleo/EWARM/Project.eww
