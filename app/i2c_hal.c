@@ -105,10 +105,14 @@ static uint16_t payloadLen;
 
 // Transmit buffer
 static uint8_t txBuf[SH2_HAL_MAX_TRANSFER_OUT];
+static uint32_t txBufLen;
 
 // True after INTN observed, until read starts
 static bool rxDataReady;
 static uint32_t discards = 0;
+
+#define MAX_RETRIES (2)
+static int i2cRetries = 0;
 
 // I2C Addr (in 7 MSB positions)
 static uint16_t i2cAddr;
@@ -375,7 +379,48 @@ void HAL_I2C_MasterTxCpltCallback(I2C_HandleTypeDef *i2c)
 
 void HAL_I2C_ErrorCallback(I2C_HandleTypeDef *i2c)
 {
-    // No error recovery implemented.
+    // Assume we will abort this operation.
+    // (Gets reset if we determine we will retry.)
+    bool abort = true;
+    
+    dbg_pulse(1);
+    if (i2cRetries < MAX_RETRIES) {
+        // Re-issue the I2C operation
+        i2cRetries++;
+        dbg_pulse(i2cRetries+1);
+
+        switch (i2cBusState) {
+            case BUS_WRITING:
+            case BUS_WRITING_DFU:
+                // Set up write operation
+                HAL_I2C_Master_Transmit_IT(i2c, i2cAddr, txBuf, txBufLen);
+                abort = false;
+                break;
+            case BUS_READING_LEN:
+                // Restart Read operation for header
+                HAL_I2C_Master_Receive_IT(i2c, i2cAddr, hdrBuf, READ_LEN);
+                abort = false;
+                break;
+            case BUS_READING_TRANSFER:
+            case BUS_READING_DFU:
+                // Restart read operation for transfer
+                HAL_I2C_Master_Receive_IT(i2c, i2cAddr, rxBuf, payloadLen);
+                abort = false;
+                break;
+            default:
+                // No operation in progress from other states.
+                break;
+        }
+    }
+
+    // If we didn't retry above, we should abort now.
+    if (abort) {
+        dbg_pulse(10);
+        hdrBufLen = 0;
+        rxBufLen = 0;
+        txBufLen = 0;
+        i2cBusState = BUS_IDLE;
+    }
 }
 
 void HAL_GPIO_EXTI_Callback(uint16_t n)
@@ -403,12 +448,14 @@ void HAL_GPIO_EXTI_Callback(uint16_t n)
         }
         
         // Read payload len
+        i2cRetries = 0;
         i2cBusState = BUS_READING_LEN;
         HAL_I2C_Master_Receive_IT(&i2c, i2cAddr, hdrBuf, READ_LEN);
     }
     else if (i2cBusState == BUS_GOT_LEN)
     {
         // Read payload
+        i2cRetries = 0;
         i2cBusState = BUS_READING_TRANSFER;
         HAL_I2C_Master_Receive_IT(&i2c, i2cAddr, rxBuf, payloadLen);
     }
@@ -567,6 +614,7 @@ static int shtp_i2c_hal_read(sh2_Hal_t *self_, uint8_t *pBuffer, unsigned len, u
     {
         if ((i2cBusState == BUS_IDLE))
         {
+            i2cRetries = 0;
             rxDataReady = false;
             i2cBusState = BUS_READING_LEN;
             HAL_I2C_Master_Receive_IT(&i2c, i2cAddr, hdrBuf, READ_LEN);
@@ -579,6 +627,7 @@ static int shtp_i2c_hal_read(sh2_Hal_t *self_, uint8_t *pBuffer, unsigned len, u
             hdrBufLen = 0;
             *t = rxTimestamp_uS;
             
+            i2cRetries = 0;
             rxDataReady = false;
             i2cBusState = BUS_READING_TRANSFER;
             HAL_I2C_Master_Receive_IT(&i2c, i2cAddr, rxBuf, payloadLen);
@@ -606,8 +655,10 @@ static int shtp_i2c_hal_write(sh2_Hal_t *self, uint8_t *pBuffer, unsigned len)
         i2cBusState = BUS_WRITING;
 
         // Set up write operation
+        i2cRetries = 0;
+        txBufLen = len;
         memcpy(txBuf, pBuffer, len);
-        HAL_I2C_Master_Transmit_IT(&i2c, i2cAddr, txBuf, len);
+        HAL_I2C_Master_Transmit_IT(&i2c, i2cAddr, txBuf, txBufLen);
 
         retval = len;
     }
@@ -724,9 +775,10 @@ static int bno_dfu_i2c_hal_read(sh2_Hal_t *self, uint8_t *pBuffer, unsigned len,
         // Initiate read if none already in progress.
         if (i2cBusState == BUS_IDLE)
         {
+            i2cRetries = 0;
             payloadLen = len;
             i2cBusState = BUS_READING_DFU;
-            HAL_I2C_Master_Receive_IT(&i2c, i2cAddr, rxBuf, len);
+            HAL_I2C_Master_Receive_IT(&i2c, i2cAddr, rxBuf, payloadLen);
         }
     }
 
@@ -750,8 +802,10 @@ static int bno_dfu_i2c_hal_write(sh2_Hal_t *self, uint8_t *pBuffer, unsigned len
         i2cBusState = BUS_WRITING_DFU;
 
         // Set up write operation
+        i2cRetries = 0;
+        txBufLen = len;
         memcpy(txBuf, pBuffer, len);
-        HAL_I2C_Master_Transmit_IT(&i2c, i2cAddr, txBuf, len);
+        HAL_I2C_Master_Transmit_IT(&i2c, i2cAddr, txBuf, txBufLen);
 
         retval = len;
     }
