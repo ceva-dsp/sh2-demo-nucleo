@@ -88,7 +88,8 @@ int dfu(void)
     }
     if ((strcmp(s, "1000-3608") != 0) &&
         (strcmp(s, "1000-3676") != 0) &&
-        (strcmp(s, "1000-4148") != 0)) {
+        (strcmp(s, "1000-4148") != 0) &&
+        (strcmp(s, "1000-4563") != 0)) {
         // Incorrect part number
         status = SH2_ERR_BAD_PARAM;
         goto close_and_return;
