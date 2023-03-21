@@ -56,6 +56,7 @@
 #include <string.h>
 
 #include "demo_app.h"
+#include "button.h"
 
 #include "sh2.h"
 #include "sh2_util.h"
@@ -560,6 +561,8 @@ void demo_init(void)
 // It calls sh2_service to keep data flowing between host and sensor hub.
 void demo_service(void)
 {
+    uint32_t now = pSh2Hal->getTimeUs(pSh2Hal);
+    
     if (resetOccurred) {
         // Restart the flow of sensor reports
         resetOccurred = false;
@@ -569,6 +572,9 @@ void demo_service(void)
     // Service the sensor hub.
     // Sensor reports and event processing handled by callbacks.
     sh2_service();
+    
+    // Handle button presses.
+    button_poll(now);
 }
 
 
