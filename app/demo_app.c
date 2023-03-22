@@ -375,7 +375,7 @@ static void printEvent(const sh2_SensorEvent_t * event)
     switch (value.sensorId) {
         case SH2_RAW_ACCELEROMETER:
             printf("%8.4f Raw acc: %d %d %d time_us:%d\n",
-                   t,
+                   (double)t,
                    value.un.rawAccelerometer.x,
                    value.un.rawAccelerometer.y,
                    value.un.rawAccelerometer.z,
@@ -384,15 +384,15 @@ static void printEvent(const sh2_SensorEvent_t * event)
 
         case SH2_ACCELEROMETER:
             printf("%8.4f Acc: %f %f %f\n",
-                   t,
-                   value.un.accelerometer.x,
-                   value.un.accelerometer.y,
-                   value.un.accelerometer.z);
+                   (double)t,
+                   (double)value.un.accelerometer.x,
+                   (double)value.un.accelerometer.y,
+                   (double)value.un.accelerometer.z);
             break;
             
         case SH2_RAW_GYROSCOPE:
             printf("%8.4f Raw gyro: x:%d y:%d z:%d temp:%d time_us:%d\n",
-                   t,
+                   (double)t,
                    value.un.rawGyroscope.x,
                    value.un.rawGyroscope.y,
                    value.un.rawGyroscope.z,
@@ -409,8 +409,8 @@ static void printEvent(const sh2_SensorEvent_t * event)
                 value.un.rotationVector.accuracy;
             printf("%8.4f Rotation Vector: "
                    "r:%0.6f i:%0.6f j:%0.6f k:%0.6f (acc: %0.6f deg)\n",
-                   t,
-                   r, i, j, k, acc_deg);
+                   (double)t,
+                   (double)r, (double)i, (double)j, (double)k, (double)acc_deg);
             break;
         case SH2_GAME_ROTATION_VECTOR:
             r = value.un.gameRotationVector.real;
@@ -419,8 +419,8 @@ static void printEvent(const sh2_SensorEvent_t * event)
             k = value.un.gameRotationVector.k;
             printf("%8.4f GRV: "
                    "r:%0.6f i:%0.6f j:%0.6f k:%0.6f\n",
-                   t,
-                   r, i, j, k);
+                   (double)t,
+                   (double)r, (double)i, (double)j, (double)k);
             break;
         case SH2_GYROSCOPE_CALIBRATED:
             x = value.un.gyroscope.x;
@@ -428,8 +428,8 @@ static void printEvent(const sh2_SensorEvent_t * event)
             z = value.un.gyroscope.z;
             printf("%8.4f GYRO: "
                    "x:%0.6f y:%0.6f z:%0.6f\n",
-                   t,
-                   x, y, z);
+                   (double)t,
+                   (double)x, (double)y, (double)z);
             break;
         case SH2_GYROSCOPE_UNCALIBRATED:
             x = value.un.gyroscopeUncal.x;
@@ -437,8 +437,8 @@ static void printEvent(const sh2_SensorEvent_t * event)
             z = value.un.gyroscopeUncal.z;
             printf("%8.4f GYRO_UNCAL: "
                    "x:%0.6f y:%0.6f z:%0.6f\n",
-                   t,
-                   x, y, z);
+                   (double)t,
+                   (double)x, (double)y, (double)z);
             break;
         case SH2_GYRO_INTEGRATED_RV:
             // These come at 1kHz, too fast to print all of them.
@@ -455,9 +455,9 @@ static void printEvent(const sh2_SensorEvent_t * event)
                 z = value.un.gyroIntegratedRV.angVelZ;
                 printf("%8.4f Gyro Integrated RV: "
                        "r:%0.6f i:%0.6f j:%0.6f k:%0.6f x:%0.6f y:%0.6f z:%0.6f\n",
-                       t,
-                       r, i, j, k,
-                       x, y, z);
+                       (double)t,
+                       (double)r, (double)i, (double)j, (double)k,
+                       (double)x, (double)y, (double)z);
             }
             break;
         case SH2_IZRO_MOTION_REQUEST:
