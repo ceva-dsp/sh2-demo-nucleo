@@ -435,7 +435,7 @@ void HAL_GPIO_EXTI_Callback(uint16_t n)
     inReset = false;
 
     // Start read, if possible
-    if ((i2cBusState == BUS_IDLE) && (hdrBufLen == 0))
+    if ((i2cBusState == BUS_IDLE) && (hdrBufLen == 0) && (rxBufLen == 0))
     {
         rxTimestamp_uS = timeNowUs();
 
