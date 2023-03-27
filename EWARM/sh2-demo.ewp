@@ -4438,7 +4438,7 @@
                 </option>
                 <option>
                     <name>RTConfigPath2</name>
-                    <state>$TOOLKIT_DIR$\INC\c\DLib_Config_Full.h</state>
+                    <state>$TOOLKIT_DIR$\inc\c\DLib_Config_Full.h</state>
                 </option>
                 <option>
                     <name>GBECoreSlave</name>
@@ -4524,7 +4524,7 @@
                 </option>
                 <option>
                     <name>DSPExtension</name>
-                    <state>0</state>
+                    <state>1</state>
                 </option>
                 <option>
                     <name>TrustZone</name>
@@ -5344,7 +5344,7 @@
                 </option>
                 <option>
                     <name>IlinkTrustzoneImportLibraryOut</name>
-                    <state>###Unitialized###</state>
+                    <state>sh2-demo_import_lib.o</state>
                 </option>
                 <option>
                     <name>OILinkExtraOption</name>
@@ -8757,6 +8757,9 @@
                     <configuration>fsp20x-uart-cal</configuration>
                     <configuration>fsp201-i2c-cal</configuration>
                 </excluded>
+            </file>
+            <file>
+                <name>$PROJ_DIR$\..\sh2\euler.c</name>
             </file>
             <file>
                 <name>$PROJ_DIR$\..\app\fsp201_i2c_hal.c</name>

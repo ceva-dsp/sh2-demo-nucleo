@@ -11406,6 +11406,9 @@
                 <name>$PROJ_DIR$\..\app\demo_rvc.c</name>
             </file>
             <file>
+                <name>$PROJ_DIR$\..\sh2\euler.c</name>
+            </file>
+            <file>
                 <name>$PROJ_DIR$\..\app\fsp201_i2c_hal.c</name>
             </file>
             <file>

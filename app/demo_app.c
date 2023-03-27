@@ -60,6 +60,7 @@
 
 #include "sh2.h"
 #include "sh2_util.h"
+#include "euler.h"
 #include "sh2_err.h"
 #include "sh2_SensorValue.h"
 #include "sh2_hal_init.h"
@@ -176,7 +177,7 @@ static void eventHandler(void * cookie, sh2_AsyncEvent_t *pEvent)
         printf("EventHandler  id:SHTP, %d\n", pEvent->shtpEvent);
     }
     else if (pEvent->eventId == SH2_GET_FEATURE_RESP) {
-        printf("EventHandler id:Sensor Config, %d\n", pEvent->sh2SensorConfigResp.sensorId);
+        // printf("EventHandler Sensor Config, %d\n", pEvent->sh2SensorConfigResp.sensorId);
     }
     else {
         printf("EventHandler, unknown event Id: %d\n", pEvent->eventId);
