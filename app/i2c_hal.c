@@ -165,7 +165,7 @@ static void hal_init_gpio(void)
 
     __HAL_RCC_GPIOA_CLK_ENABLE();
     __HAL_RCC_GPIOB_CLK_ENABLE();
-    
+
     /* Configure PS0_WAKEN */
     HAL_GPIO_WritePin(PS0_WAKEN_PORT, PS0_WAKEN_PIN, GPIO_PIN_RESET);
     GPIO_InitStruct.Pin = PS0_WAKEN_PIN;
@@ -220,7 +220,7 @@ static void hal_init_gpio(void)
 static void hal_init_i2c(void)
 {
     GPIO_InitTypeDef GPIO_InitStruct;
-    
+
     // Configure GPIO Pins for use with I2C
     // PB8 : I2C1_SCL
     // PB9 : I2C1_SDA 
@@ -243,7 +243,7 @@ static void hal_init_i2c(void)
     i2c.Init.OwnAddress2 = 0;
     i2c.Init.GeneralCallMode = I2C_GENERALCALL_DISABLED;
     i2c.Init.NoStretchMode = I2C_NOSTRETCH_DISABLED;
-    
+
     HAL_I2C_Init(&i2c);
 
     // Set Priority for I2C IRQ and enable
@@ -254,7 +254,7 @@ static void hal_init_i2c(void)
 static void hal_init_timer(void)
 {
     __HAL_RCC_TIM2_CLK_ENABLE();
-    
+
     // Prescale to get 1 count per uS
     uint32_t prescaler = (uint32_t)((HAL_RCC_GetPCLK2Freq() / 1000000) - 1);
 
@@ -384,7 +384,7 @@ void HAL_I2C_ErrorCallback(I2C_HandleTypeDef *i2c)
     // Assume we will abort this operation.
     // (Gets reset if we determine we will retry.)
     bool abort = true;
-    
+
     if (i2cRetries < MAX_RETRIES) {
         // Re-issue the I2C operation
         i2cRetries++;
@@ -430,7 +430,7 @@ void HAL_GPIO_EXTI_Callback(uint16_t n)
         // No active hal, ignore this call, don't crash.
         return;
     }
-    
+
 
     inReset = false;
 
@@ -484,7 +484,7 @@ static int shtp_i2c_hal_open(sh2_Hal_t *self_)
 {
     // cast sh2_hal_t pointer to i2c_hal_t
     i2c_hal_t *self = (i2c_hal_t *)self_;
-    
+
     if (isOpen)
     {
         return SH2_ERR;
@@ -518,12 +518,12 @@ static int shtp_i2c_hal_open(sh2_Hal_t *self_)
     ps0_waken(false);
     ps1(false);
 
-    // Set BOOTN according to whether we need to DFUDeassert BOOT, don't go into bootloader
+    // Set BOOTN according to whether we need to DFU
     bootn(!self->dfu);
-    
+
     // Delay for RESET_DELAY_US to ensure reset takes effect
     delay_us(RESET_DELAY_US);
-    
+
     enableInts();
 
     // Deassert reset
@@ -549,20 +549,20 @@ static void shtp_i2c_hal_close(sh2_Hal_t *self_)
 
     // Deinit I2C peripheral
     HAL_I2C_DeInit(&i2c);
-    
+
     // Disable interrupts
     disableInts();
-    
+
     // Deinit timer
     __HAL_TIM_DISABLE(&tim2);
-    
+
     isOpen = false;
 }
 
 static int shtp_i2c_hal_read(sh2_Hal_t *self_, uint8_t *pBuffer, unsigned len, uint32_t *t)
 {
     int retval = 0;
-    
+
     disableInts();
 
     if (hdrBufLen > 0)
@@ -636,7 +636,7 @@ static int shtp_i2c_hal_read(sh2_Hal_t *self_, uint8_t *pBuffer, unsigned len, u
 static int shtp_i2c_hal_write(sh2_Hal_t *self, uint8_t *pBuffer, unsigned len)
 {
     int retval = 0;
-    
+
     // Validate parameters
     if ((pBuffer == 0) || (len == 0) || (len > sizeof(txBuf)))
     {
@@ -645,7 +645,7 @@ static int shtp_i2c_hal_write(sh2_Hal_t *self, uint8_t *pBuffer, unsigned len)
 
     // Disable I2C Interrupt for a moment so busState can't change
     disableI2cInts();
-    
+
     if (i2cBusState == BUS_IDLE)
     {
         i2cBusState = BUS_WRITING;
@@ -662,7 +662,7 @@ static int shtp_i2c_hal_write(sh2_Hal_t *self, uint8_t *pBuffer, unsigned len)
 
     // re-enable interrupts
     enableI2cInts();
-    
+
     return retval;
 }
 
@@ -678,7 +678,7 @@ static int bno_dfu_i2c_hal_open(sh2_Hal_t *self_)
 {
     // cast sh2_hal_t pointer to i2c_hal_t
     i2c_hal_t *self = (i2c_hal_t *)self_;
-    
+
     if (isOpen)
     {
         return SH2_ERR;
@@ -697,14 +697,14 @@ static int bno_dfu_i2c_hal_open(sh2_Hal_t *self_)
 
     // Delay for RESET_DELAY_US to ensure reset takes effect
     delay_us(RESET_DELAY_US);
-    
+
     // Clear rx, tx buffers
     rxBufLen = 0;
     hdrBufLen = 0;
     rxDataReady = false;
-    
+
     i2cBusState = BUS_IDLE;
-    
+
     // Enable interrupts.
     enableI2cInts();
 
@@ -731,23 +731,23 @@ static void bno_dfu_i2c_hal_close(sh2_Hal_t *self)
 {
     // Hold sensor hub in reset, for dfu
     rstn(false);
-    
+
     // Disable interrupts
     disableInts();
-    
+
     // Deinit I2C peripheral
     HAL_I2C_DeInit(&i2c);
 
     // Deinit timer
     __HAL_TIM_DISABLE(&tim2);
-    
+
     isOpen = false;
 }
 
 static int bno_dfu_i2c_hal_read(sh2_Hal_t *self, uint8_t *pBuffer, unsigned len, uint32_t *t)
 {
     int retval = 0;
-    
+
     if ((i2cBusState != BUS_READING_DFU) && (rxBufLen > 0))
     {
         // There is data to be had.
@@ -785,7 +785,7 @@ static int bno_dfu_i2c_hal_read(sh2_Hal_t *self, uint8_t *pBuffer, unsigned len,
 static int bno_dfu_i2c_hal_write(sh2_Hal_t *self, uint8_t *pBuffer, unsigned len)
 {
     int retval = 0;
-    
+
     // Validate parameters
     if ((pBuffer == 0) || (len == 0) || (len > sizeof(txBuf)))
     {
@@ -793,7 +793,7 @@ static int bno_dfu_i2c_hal_write(sh2_Hal_t *self, uint8_t *pBuffer, unsigned len
     }
 
     disableI2cInts();
-    
+
     if (i2cBusState == BUS_IDLE)
     {
         i2cBusState = BUS_WRITING_DFU;
@@ -806,10 +806,10 @@ static int bno_dfu_i2c_hal_write(sh2_Hal_t *self, uint8_t *pBuffer, unsigned len
 
         retval = len;
     }
-    
+
     // re-enable interrupts
     enableI2cInts();
-    
+
     return retval;
 }
 
@@ -836,7 +836,7 @@ sh2_Hal_t *bno_dfu_i2c_hal_init(i2c_hal_t *pHal, bool dfu, uint8_t addr)
 {
     pHal->dfu = dfu;
     pHal->i2c_addr = addr;
-    
+
     // Set up the HAL reference object for the client
     pHal->sh2_hal.open = bno_dfu_i2c_hal_open;
     pHal->sh2_hal.close = bno_dfu_i2c_hal_close;

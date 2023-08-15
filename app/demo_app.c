@@ -1,5 +1,5 @@
 /*
- * Copyright 2017-2021 CEVA, Inc.
+ * Copyright 2017-2023 CEVA, Inc.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License and 
@@ -16,7 +16,7 @@
  */
 
 /*
- * Demo App for SH-2 devices (BNO08x and FSP200)
+ * Demo App for SH-2 devices (BNO08x and FSP20x)
  */
 
 // ------------------------------------------------------------------------
@@ -219,14 +219,14 @@ static void printDsf(const sh2_SensorEvent_t * event)
 
     // Convert event to value
     sh2_decodeSensorEvent(&value, event);
-    
+
     // Compute new sample_id
     uint8_t deltaSeq = value.sequence - (lastSequence[value.sensorId] & 0xFF);
     lastSequence[value.sensorId] += deltaSeq;
 
     // Get time as float
     t = value.timestamp / 1000000.0;
-    
+
     switch (value.sensorId) {
         case SH2_RAW_ACCELEROMETER:
             printf(".%d %0.6f, %d, %d, %d, %d\n",
@@ -333,10 +333,10 @@ static void printDsf(const sh2_SensorEvent_t * event)
 static void reportProdIds(void)
 {
     int status;
-    
+
     memset(&prodIds, 0, sizeof(prodIds));
     status = sh2_getProdIds(&prodIds);
-    
+
     if (status < 0) {
         printf("Error from sh2_getProdIds.\n");
         return;
@@ -504,9 +504,9 @@ static void sensorHandler(void * cookie, sh2_SensorEvent_t *pEvent)
 void demo_init(void)
 {
     int status;
-    
+
     printf("\n\nCEVA SH2 Sensor Hub Demo.\n\n");
-    
+
 #ifdef PERFORM_DFU
     printf("DFU completes in 10-25 seconds in most configurations.\n");
     printf("It can take up to 240 seconds with 9600 baud UART.\n");
@@ -563,17 +563,17 @@ void demo_init(void)
 void demo_service(void)
 {
     uint32_t now = pSh2Hal->getTimeUs(pSh2Hal);
-    
+
     if (resetOccurred) {
         // Restart the flow of sensor reports
         resetOccurred = false;
         startReports();
     }
-    
+
     // Service the sensor hub.
     // Sensor reports and event processing handled by callbacks.
     sh2_service();
-    
+
     // Handle button presses.
     button_poll(now);
 }
