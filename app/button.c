@@ -6,8 +6,8 @@
 #include "stm32f4xx_hal.h"
 
 // Use pin C13 for button input
-#define BUTTON_GPIO_PORT GPIOC  // TODO-DW
-#define BUTTON_GPIO_PIN  GPIO_PIN_13 // TODO-DW
+#define BUTTON_GPIO_PORT GPIOC
+#define BUTTON_GPIO_PIN  GPIO_PIN_13
 
 #define DEBOUNCE_INTERVAL_US (10000)
 #define LONG_PRESS_US (500000)
