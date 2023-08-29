@@ -59,3 +59,15 @@ Part 10004149 : Version 4.6.7 Build 30
 .
 .
 ```
+
+## Release Notes
+### v1.4.0
+* Sensor configuration is now based on a table.
+* I2C HAL reads 4 bytes, not 2, on initial read.  (Fixes SHTP sequence number errors.)
+* UART HAL now has #define ALWAYS_WAKE to bypass wake functionality.
+* Fixed error in stability detector configuration.
+* Added I2C bus retry logic to handle NAK events.
+* DFU for FSP200 no longer checks product ids.
+* New product id, 1000-4563, added to BNO08x DFU checks.
+* Added #define switch to support console operation at 2MBPS.
+* Updated IAR Embedded Workbench project to version 9.30.
