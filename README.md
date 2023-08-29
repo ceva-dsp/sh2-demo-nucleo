@@ -23,7 +23,7 @@ module.
 ## Setup
 
 Clone this repository using the --recursive flag with git:
-  * git clone --recursive https://github.com/hcrest/sh2-demo-nucleo.git
+  * git clone --recursive https://github.com/ceva-dsp/sh2-demo-nucleo.git
 
 ## Building the Code
 * Use IAR EWARM to open the workspace, sh2-demo-nucleo/EWARM/Project.eww
@@ -45,16 +45,29 @@ reading and printing Game Rotation Vectors from the sensor hub:
 ```
 
 CEVA SH2 Demo.
-Part 10003608 : Version 3.2.12 Build 475
-Part 10003606 : Version 1.2.4 Build 230
-Part 10003254 : Version 4.4.3 Build 485
-Part 100e  0.3017 GRV: r:0.021179 i:-0.000244 j:0.999695 k:-0.011353
-  0.3117 GRV: r:0.021179 i:-0.000244 j:0.999695 k:-0.011353
-  0.3220 GRV: r:0.021118 i:-0.000244 j:0.999695 k:-0.011353
-  0.3320 GRV: r:0.021118 i:-0.000244 j:0.999695 k:-0.011292
-  0.3420 GRV: r:0.021118 i:-0.000244 j:0.999695 k:-0.011292
-  0.3521 GRV: r:0.021118 i:-0.000244 j:0.999695 k:-0.011292
+Part 10003608 : Version 3.6.0 Build 671
+Part 10003606 : Version 1.5.0 Build 305
+Part 10004135 : Version 4.11.0 Build 68
+Part 10004149 : Version 4.6.7 Build 30
+  0.2611 GRV: r:0.998901 i:-0.002075 j:-0.046509 k:0.000122
+  0.2714 GRV: r:0.998901 i:-0.002075 j:-0.046509 k:0.000061
+  0.2814 GRV: r:0.998901 i:-0.002075 j:-0.046509 k:0.000061
+  0.2921 GRV: r:0.998901 i:-0.002075 j:-0.046509 k:0.000061
+  0.3015 GRV: r:0.998901 i:-0.002075 j:-0.046509 k:0.000061
+  0.3123 GRV: r:0.998901 i:-0.002075 j:-0.046509 k:0.000122
 .
 .
 .
 ```
+
+## Release Notes
+### v1.4.0
+* Sensor configuration is now based on a table.
+* I2C HAL reads 4 bytes, not 2, on initial read.  (Fixes SHTP sequence number errors.)
+* UART HAL now has #define ALWAYS_WAKE to bypass wake functionality.
+* Fixed error in stability detector configuration.
+* Added I2C bus retry logic to handle NAK events.
+* DFU for FSP200 no longer checks product ids.
+* New product id, 1000-4563, added to BNO08x DFU checks.
+* Added #define switch to support console operation at 2MBPS.
+* Updated IAR Embedded Workbench project to version 9.30.

@@ -180,7 +180,8 @@ static void openFirmware()
         return;
     }
     dfu_.firmwareOpened = true;
-
+    
+/*    
     // Validate firmware matches this implementation
     const char *fmt = dfu_.firmware->getMeta("FW-Format");
     const char *pn = dfu_.firmware->getMeta("SW-Part-Number");
@@ -189,7 +190,7 @@ static void openFirmware()
         dfu_.status = SH2_ERR_BAD_PARAM;
         return;
     }
-    
+
     if ((strcmp(fmt, "EFM32_V1") == 0) && 
         (strcmp(pn, "1000-4095") == 0)) {
            // valid FSP200 firmware
@@ -203,6 +204,7 @@ static void openFirmware()
         dfu_.status = SH2_ERR_BAD_PARAM;
         return;   
     }
+*/
 
     // Validate firmware length
     dfu_.appLen = dfu_.firmware->getAppLen();

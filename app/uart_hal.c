@@ -45,6 +45,9 @@
 
 #define BNO_DFU_BPS (115200)         // 115200 bps for UART-DFU
 
+// When defined, PS0_WAKEN is always asserted.  Otherwise PS0_WAKEN
+// is deasserted when host is not talking to sensor hub.
+// #define ALWAYS_WAKE
 
 #define TX_PORT GPIOA
 #define TX_PIN  GPIO_PIN_9
@@ -513,9 +516,13 @@ static void txStep(void)
             txIndex = 0;
             txState = TX_IDLE;
             lastBsn = 0;
-        
+             
+#ifdef ALWAYS_WAKE
+            ps0_waken(false);
+#else
             // deassert wake
             ps0_waken(true);
+#endif
         }
         else {
             // Send one byte

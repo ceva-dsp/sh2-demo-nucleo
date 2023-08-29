@@ -1,5 +1,5 @@
 /*
- * Copyright 2017-2021 CEVA, Inc.
+ * Copyright 2017-2023 CEVA, Inc.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License and 
@@ -16,7 +16,7 @@
  */
 
 /*
- * Demo App for SH-2 devices (BNO08x and FSP200)
+ * Demo App for SH-2 devices (BNO08x and FSP20x)
  */
 
 // ------------------------------------------------------------------------
@@ -56,9 +56,11 @@
 #include <string.h>
 
 #include "demo_app.h"
+#include "button.h"
 
 #include "sh2.h"
 #include "sh2_util.h"
+#include "euler.h"
 #include "sh2_err.h"
 #include "sh2_SensorValue.h"
 #include "sh2_hal_init.h"
@@ -106,50 +108,62 @@ static void configShakeDetector(void)
 
 #endif
 
+static void delayUs(uint32_t t)
+{
+    uint32_t now_us = pSh2Hal->getTimeUs(pSh2Hal);
+    uint32_t start_us = now_us;
+
+    while (t > (now_us - start_us))
+    {
+        now_us = pSh2Hal->getTimeUs(pSh2Hal);
+    }
+}
+
 // Configure one sensor to produce periodic reports
 static void startReports()
 {
-    static sh2_SensorConfig_t config;
     int status;
-    int sensorId;
-    static const int enabledSensors[] =
+
+    // Each entry of sensorConfig[] represents one sensor to be configured in the loop below
+    static const struct {
+        int sensorId;
+        sh2_SensorConfig_t config;
+    } sensorConfig[] =
     {
-        SH2_GAME_ROTATION_VECTOR,
-        // SH2_RAW_ACCELEROMETER,
-        // SH2_RAW_GYROSCOPE,
-        // SH2_ROTATION_VECTOR,
-        // SH2_GYRO_INTEGRATED_RV,
-        // SH2_IZRO_MOTION_REQUEST,
-        // SH2_SHAKE_DETECTOR,
+        // Game Rotation Vector, 100Hz
+        {SH2_GAME_ROTATION_VECTOR, {.reportInterval_us = 10000}},
+
+        // Stability Detector, 100 Hz, changeSensitivityEnabled
+        // {SH2_STABILITY_DETECTOR, {.reportInterval_us = 10000, .changeSensitivityEnabled = true}},
+
+        // Raw accel, 100 Hz
+        // {SH2_RAW_ACCELEROMETER, {.reportInterval_us = 10000}},
+
+        // Raw gyroscope, 100 Hz
+        // {SH2_RAW_GYROSCOPE, {.reportInterval_us = 10000}},
+
+        // Rotation Vector, 100 Hz
+        // {SH2_ROTATION_VECTOR, {.reportInterval_us = 10000}},
+
+        // Gyro Integrated Rotation Vector, 100 Hz
+        // {SH2_GYRO_INTEGRATED_RV, {.reportInterval_us = 10000}},
+
+        // Motion requests for Interactive Zero Reference Offset cal
+        // {SH2_IZRO_MOTION_REQUEST, {.reportInterval_us = 10000}},
+
+        // Shake detector
+        // {SH2_SHAKE_DETECTOR, {.reportInterval_us = 10000}},
     };
 
-    // These sensor options are disabled or not used in most cases
-    config.changeSensitivityEnabled = false;
-    config.wakeupEnabled = false;
-    config.changeSensitivityRelative = false;
-    config.alwaysOnEnabled = false;
-    config.sniffEnabled = false;
-    config.changeSensitivity = 0;
-    config.batchInterval_us = 0;
-    config.sensorSpecific = 0;
-
-    // Select a report interval.
-    // config.reportInterval_us = 100000;  // microseconds (10 Hz)
-    // config.reportInterval_us = 40000;  // microseconds (25 Hz)
-    config.reportInterval_us = 10000;  // microseconds (100 Hz)
-    // config.reportInterval_us = 2500;   // microseconds (400 Hz)
-    // config.reportInterval_us = 1000;   // microseconds (1000 Hz)
-
-    for (int n = 0; n < ARRAY_LEN(enabledSensors); n++)
+    for (int n = 0; n < ARRAY_LEN(sensorConfig); n++)
     {
-        // Configure the sensor hub to produce these reports
-        sensorId = enabledSensors[n];
-        status = sh2_setSensorConfig(sensorId, &config);
+        int sensorId = sensorConfig[n].sensorId;
+
+        status = sh2_setSensorConfig(sensorId, &sensorConfig[n].config);
         if (status != 0) {
             printf("Error while enabling sensor %d\n", sensorId);
         }
     }
-    
 }
 
 // Handle non-sensor events from the sensor hub
@@ -158,6 +172,15 @@ static void eventHandler(void * cookie, sh2_AsyncEvent_t *pEvent)
     // If we see a reset, set a flag so that sensors will be reconfigured.
     if (pEvent->eventId == SH2_RESET) {
         resetOccurred = true;
+    }
+    else if (pEvent->eventId == SH2_SHTP_EVENT) {
+        printf("EventHandler  id:SHTP, %d\n", pEvent->shtpEvent);
+    }
+    else if (pEvent->eventId == SH2_GET_FEATURE_RESP) {
+        // printf("EventHandler Sensor Config, %d\n", pEvent->sh2SensorConfigResp.sensorId);
+    }
+    else {
+        printf("EventHandler, unknown event Id: %d\n", pEvent->eventId);
     }
 }
 
@@ -196,14 +219,14 @@ static void printDsf(const sh2_SensorEvent_t * event)
 
     // Convert event to value
     sh2_decodeSensorEvent(&value, event);
-    
+
     // Compute new sample_id
     uint8_t deltaSeq = value.sequence - (lastSequence[value.sensorId] & 0xFF);
     lastSequence[value.sensorId] += deltaSeq;
 
     // Get time as float
     t = value.timestamp / 1000000.0;
-    
+
     switch (value.sensorId) {
         case SH2_RAW_ACCELEROMETER:
             printf(".%d %0.6f, %d, %d, %d, %d\n",
@@ -304,26 +327,16 @@ static void printDsf(const sh2_SensorEvent_t * event)
 }
 #endif
 
-static void delayUs(uint32_t t)
-{
-    uint32_t now_us = pSh2Hal->getTimeUs(pSh2Hal);
-    uint32_t start_us = now_us;
-
-    while (t > (now_us - start_us))
-    {
-        now_us = pSh2Hal->getTimeUs(pSh2Hal);
-    }
-}
 
 #ifndef DSF_OUTPUT
 // Read product ids with version info from sensor hub and print them
 static void reportProdIds(void)
 {
     int status;
-    
+
     memset(&prodIds, 0, sizeof(prodIds));
     status = sh2_getProdIds(&prodIds);
-    
+
     if (status < 0) {
         printf("Error from sh2_getProdIds.\n");
         return;
@@ -362,24 +375,25 @@ static void printEvent(const sh2_SensorEvent_t * event)
     t = value.timestamp / 1000000.0;  // time in seconds.
     switch (value.sensorId) {
         case SH2_RAW_ACCELEROMETER:
-            printf("%8.4f Raw acc: %d %d %d\n",
-                   t,
+            printf("%8.4f Raw acc: %d %d %d time_us:%d\n",
+                   (double)t,
                    value.un.rawAccelerometer.x,
                    value.un.rawAccelerometer.y,
-                   value.un.rawAccelerometer.z);
+                   value.un.rawAccelerometer.z,
+                   value.un.rawAccelerometer.timestamp);
             break;
 
         case SH2_ACCELEROMETER:
             printf("%8.4f Acc: %f %f %f\n",
-                   t,
-                   value.un.accelerometer.x,
-                   value.un.accelerometer.y,
-                   value.un.accelerometer.z);
+                   (double)t,
+                   (double)value.un.accelerometer.x,
+                   (double)value.un.accelerometer.y,
+                   (double)value.un.accelerometer.z);
             break;
             
         case SH2_RAW_GYROSCOPE:
             printf("%8.4f Raw gyro: x:%d y:%d z:%d temp:%d time_us:%d\n",
-                   t,
+                   (double)t,
                    value.un.rawGyroscope.x,
                    value.un.rawGyroscope.y,
                    value.un.rawGyroscope.z,
@@ -396,8 +410,8 @@ static void printEvent(const sh2_SensorEvent_t * event)
                 value.un.rotationVector.accuracy;
             printf("%8.4f Rotation Vector: "
                    "r:%0.6f i:%0.6f j:%0.6f k:%0.6f (acc: %0.6f deg)\n",
-                   t,
-                   r, i, j, k, acc_deg);
+                   (double)t,
+                   (double)r, (double)i, (double)j, (double)k, (double)acc_deg);
             break;
         case SH2_GAME_ROTATION_VECTOR:
             r = value.un.gameRotationVector.real;
@@ -406,8 +420,8 @@ static void printEvent(const sh2_SensorEvent_t * event)
             k = value.un.gameRotationVector.k;
             printf("%8.4f GRV: "
                    "r:%0.6f i:%0.6f j:%0.6f k:%0.6f\n",
-                   t,
-                   r, i, j, k);
+                   (double)t,
+                   (double)r, (double)i, (double)j, (double)k);
             break;
         case SH2_GYROSCOPE_CALIBRATED:
             x = value.un.gyroscope.x;
@@ -415,8 +429,8 @@ static void printEvent(const sh2_SensorEvent_t * event)
             z = value.un.gyroscope.z;
             printf("%8.4f GYRO: "
                    "x:%0.6f y:%0.6f z:%0.6f\n",
-                   t,
-                   x, y, z);
+                   (double)t,
+                   (double)x, (double)y, (double)z);
             break;
         case SH2_GYROSCOPE_UNCALIBRATED:
             x = value.un.gyroscopeUncal.x;
@@ -424,8 +438,8 @@ static void printEvent(const sh2_SensorEvent_t * event)
             z = value.un.gyroscopeUncal.z;
             printf("%8.4f GYRO_UNCAL: "
                    "x:%0.6f y:%0.6f z:%0.6f\n",
-                   t,
-                   x, y, z);
+                   (double)t,
+                   (double)x, (double)y, (double)z);
             break;
         case SH2_GYRO_INTEGRATED_RV:
             // These come at 1kHz, too fast to print all of them.
@@ -442,9 +456,9 @@ static void printEvent(const sh2_SensorEvent_t * event)
                 z = value.un.gyroIntegratedRV.angVelZ;
                 printf("%8.4f Gyro Integrated RV: "
                        "r:%0.6f i:%0.6f j:%0.6f k:%0.6f x:%0.6f y:%0.6f z:%0.6f\n",
-                       t,
-                       r, i, j, k,
-                       x, y, z);
+                       (double)t,
+                       (double)r, (double)i, (double)j, (double)k,
+                       (double)x, (double)y, (double)z);
             }
             break;
         case SH2_IZRO_MOTION_REQUEST:
@@ -458,6 +472,14 @@ static void printEvent(const sh2_SensorEvent_t * event)
                    (value.un.shakeDetector.shake & SHAKE_Y) ? 'Y' : '.',
                    (value.un.shakeDetector.shake & SHAKE_Z) ? 'Z' : '.');
 
+            break;
+        case SH2_STABILITY_CLASSIFIER:
+            printf("Stability Classification: %d\n",
+                   value.un.stabilityClassifier.classification);
+            break;
+        case SH2_STABILITY_DETECTOR:
+            printf("Stability Detector: %d\n",
+                   value.un.stabilityDetector.stability);
             break;
         default:
             printf("Unknown sensor: %d\n", value.sensorId);
@@ -482,9 +504,9 @@ static void sensorHandler(void * cookie, sh2_SensorEvent_t *pEvent)
 void demo_init(void)
 {
     int status;
-    
+
     printf("\n\nCEVA SH2 Sensor Hub Demo.\n\n");
-    
+
 #ifdef PERFORM_DFU
     printf("DFU completes in 10-25 seconds in most configurations.\n");
     printf("It can take up to 240 seconds with 9600 baud UART.\n");
@@ -540,15 +562,20 @@ void demo_init(void)
 // It calls sh2_service to keep data flowing between host and sensor hub.
 void demo_service(void)
 {
+    uint32_t now = pSh2Hal->getTimeUs(pSh2Hal);
+
     if (resetOccurred) {
         // Restart the flow of sensor reports
         resetOccurred = false;
         startReports();
     }
-    
+
     // Service the sensor hub.
     // Sensor reports and event processing handled by callbacks.
     sh2_service();
+
+    // Handle button presses.
+    button_poll(now);
 }
 
 

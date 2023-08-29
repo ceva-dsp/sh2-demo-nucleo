@@ -28,7 +28,9 @@
 
 #include "usart.h"
 
-#define CONSOLE_BUFLEN (4096)
+#define CONSOLE_BUFLEN (4*4096)
+#define CONSOLE_BAUD_RATE 115200
+// #define CONSOLE_BAUD_RATE 2000000  // Use this when logging DSF records
 
 // ------------------------------------------------------------------------
 // Private types
@@ -96,7 +98,7 @@ void console_init(void)
 
     // Init UART itself
     consoleUart.Instance = USART2;
-    consoleUart.Init.BaudRate = 115200;
+    consoleUart.Init.BaudRate = CONSOLE_BAUD_RATE;;
     consoleUart.Init.WordLength = UART_WORDLENGTH_8B;
     consoleUart.Init.StopBits = UART_STOPBITS_1;
     consoleUart.Init.Parity = UART_PARITY_NONE;

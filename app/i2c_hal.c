@@ -1,5 +1,5 @@
 /*
- * Copyright 2018-21 CEVA, Inc.
+ * Copyright 2018-23 CEVA, Inc.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License and 
@@ -61,8 +61,12 @@
 // Wait this long before assuming bootloader is ready
 #define DFU_BOOT_DELAY_US (3000000) // (50000)
 
-// How many bytes to read when reading the length field
-#define READ_LEN (2)
+// Initial read of I2C bus is this long.  This reads the full header, then
+// a subsequent read will read the full payload (along with a new header.)
+#define READ_LEN (4)
+
+// A very brief wait before writes to avoid NAK
+#define I2C_WRITE_DELAY_US (10)
 
 // ------------------------------------------------------------------------
 // Private types
@@ -91,21 +95,26 @@ TIM_HandleTypeDef tim2;
 // I2C Peripheral, I2C1
 I2C_HandleTypeDef i2c;
 
-enum BusState_e i2cBusState;
+static volatile enum BusState_e i2cBusState;
 
 volatile uint32_t rxTimestamp_uS;            // timestamp of INTN event
 
 // Receive Buffer
 static uint8_t rxBuf[SH2_HAL_MAX_TRANSFER_IN];      // data
-static uint32_t rxBufLen;   // valid bytes stored in rxBuf (0 when buf empty)
+static volatile uint32_t rxBufLen;   // valid bytes stored in rxBuf (0 when buf empty)
+static uint8_t hdrBuf[READ_LEN];
+static volatile uint32_t hdrBufLen;
 static uint16_t payloadLen;
 
 // Transmit buffer
 static uint8_t txBuf[SH2_HAL_MAX_TRANSFER_OUT];
+static uint32_t txBufLen;
 
 // True after INTN observed, until read starts
 static bool rxDataReady;
-static uint32_t discards = 0;
+
+#define MAX_RETRIES (2)
+static int i2cRetries = 0;
 
 // I2C Addr (in 7 MSB positions)
 static uint16_t i2cAddr;
@@ -156,7 +165,7 @@ static void hal_init_gpio(void)
 
     __HAL_RCC_GPIOA_CLK_ENABLE();
     __HAL_RCC_GPIOB_CLK_ENABLE();
-    
+
     /* Configure PS0_WAKEN */
     HAL_GPIO_WritePin(PS0_WAKEN_PORT, PS0_WAKEN_PIN, GPIO_PIN_RESET);
     GPIO_InitStruct.Pin = PS0_WAKEN_PIN;
@@ -182,7 +191,7 @@ static void hal_init_gpio(void)
     HAL_GPIO_Init(RSTN_PORT, &GPIO_InitStruct);
 
     /* Configure BOOTN */
-    HAL_GPIO_WritePin(BOOTN_PORT, BOOTN_PIN, GPIO_PIN_RESET);
+    HAL_GPIO_WritePin(BOOTN_PORT, BOOTN_PIN, GPIO_PIN_SET);
     GPIO_InitStruct.Pin = BOOTN_PIN;
     GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_PP;
     GPIO_InitStruct.Pull = GPIO_NOPULL;
@@ -211,7 +220,7 @@ static void hal_init_gpio(void)
 static void hal_init_i2c(void)
 {
     GPIO_InitTypeDef GPIO_InitStruct;
-    
+
     // Configure GPIO Pins for use with I2C
     // PB8 : I2C1_SCL
     // PB9 : I2C1_SDA 
@@ -234,7 +243,7 @@ static void hal_init_i2c(void)
     i2c.Init.OwnAddress2 = 0;
     i2c.Init.GeneralCallMode = I2C_GENERALCALL_DISABLED;
     i2c.Init.NoStretchMode = I2C_NOSTRETCH_DISABLED;
-    
+
     HAL_I2C_Init(&i2c);
 
     // Set Priority for I2C IRQ and enable
@@ -245,7 +254,7 @@ static void hal_init_i2c(void)
 static void hal_init_timer(void)
 {
     __HAL_RCC_TIM2_CLK_ENABLE();
-    
+
     // Prescale to get 1 count per uS
     uint32_t prescaler = (uint32_t)((HAL_RCC_GetPCLK2Freq() / 1000000) - 1);
 
@@ -321,11 +330,14 @@ static void reset_delay_us(uint32_t t)
 
 void HAL_I2C_MasterRxCpltCallback(I2C_HandleTypeDef *pI2c)
 {
+    // read bus state just once for consistency.
+    enum BusState_e busState = i2cBusState;
+    
     // Read completed
-    if (i2cBusState == BUS_READING_LEN)
+    if (busState == BUS_READING_LEN)
     {
         // Len of payload is available, decide how long to do next read
-        uint16_t len = (rxBuf[0] + (rxBuf[1] << 8)) & ~0x8000;
+        uint16_t len = (hdrBuf[0] + (hdrBuf[1] << 8)) & ~0x8000;
         if (len > sizeof(rxBuf))
         {
             // read only what will fit in rxBuf
@@ -335,9 +347,11 @@ void HAL_I2C_MasterRxCpltCallback(I2C_HandleTypeDef *pI2c)
         {
             payloadLen = len;
         }
+
+        hdrBufLen = READ_LEN;
         i2cBusState = BUS_GOT_LEN;
     }
-    else if (i2cBusState == BUS_READING_TRANSFER)
+    else if (busState == BUS_READING_TRANSFER)
     {
         // rxBuf is now ready for client.
         rxBufLen = payloadLen;
@@ -345,9 +359,10 @@ void HAL_I2C_MasterRxCpltCallback(I2C_HandleTypeDef *pI2c)
         // Nothing left to do
         i2cBusState = BUS_IDLE;
     }
-    else if (i2cBusState == BUS_READING_DFU)
+    else if (busState == BUS_READING_DFU)
     {
         // Transition back to idle state
+        hdrBufLen = 0;
         rxBufLen = payloadLen;
         i2cBusState = BUS_IDLE;
     }
@@ -355,46 +370,93 @@ void HAL_I2C_MasterRxCpltCallback(I2C_HandleTypeDef *pI2c)
 
 void HAL_I2C_MasterTxCpltCallback(I2C_HandleTypeDef *i2c)
 {
-    if (i2cBusState == BUS_WRITING)
+    // read bus state just once for consistency.
+    enum BusState_e busState = i2cBusState;
+    
+    if (busState == BUS_WRITING)
     {
         // Switch back to bus idle
         i2cBusState = BUS_IDLE;
     }
-    else if (i2cBusState == BUS_WRITING_DFU)
+    else if (busState == BUS_WRITING_DFU)
     {
         // Switch back to bus idle
         i2cBusState = BUS_IDLE;
     }
 }
 
+void HAL_I2C_ErrorCallback(I2C_HandleTypeDef *i2c)
+{
+    // Assume we will abort this operation.
+    // (Gets reset if we determine we will retry.)
+    bool abort = true;
+
+    if (i2cRetries < MAX_RETRIES) {
+        // Re-issue the I2C operation
+        i2cRetries++;
+
+        switch (i2cBusState) {
+            case BUS_WRITING:
+            case BUS_WRITING_DFU:
+                // Set up write operation
+                delay_us(I2C_WRITE_DELAY_US);
+                HAL_I2C_Master_Transmit_IT(i2c, i2cAddr, txBuf, txBufLen);
+                abort = false;
+                break;
+            case BUS_READING_LEN:
+                // Restart Read operation for header
+                HAL_I2C_Master_Receive_IT(i2c, i2cAddr, hdrBuf, READ_LEN);
+                abort = false;
+                break;
+            case BUS_READING_TRANSFER:
+            case BUS_READING_DFU:
+                // Restart read operation for transfer
+                HAL_I2C_Master_Receive_IT(i2c, i2cAddr, rxBuf, payloadLen);
+                abort = false;
+                break;
+            default:
+                // No operation in progress from other states.
+                break;
+        }
+    }
+
+    // If we didn't retry above, we should abort now.
+    if (abort) {
+        hdrBufLen = 0;
+        rxBufLen = 0;
+        txBufLen = 0;
+        i2cBusState = BUS_IDLE;
+    }
+}
+
 void HAL_GPIO_EXTI_Callback(uint16_t n)
 {
-    if (i2cBusState == BUS_INIT)
+    // read bus state just once for consistency.
+    enum BusState_e busState = i2cBusState;
+    
+    if (busState == BUS_INIT)
     {
         // No active hal, ignore this call, don't crash.
         return;
     }
-    
-    rxTimestamp_uS = timeNowUs();
+
+
     inReset = false;
 
     // Start read, if possible
-    if (i2cBusState == BUS_IDLE)
+    if ((busState == BUS_IDLE) && (hdrBufLen == 0) && (rxBufLen == 0))
     {
-        if (rxBufLen > 0)
-        {
-            // Discard earlier payload!
-            discards++;
-            rxBufLen = 0;
-        }
-        
-        // Read payload len
+        rxTimestamp_uS = timeNowUs();
+
+        // Read header to get payload length
+        i2cRetries = 0;
         i2cBusState = BUS_READING_LEN;
-        HAL_I2C_Master_Receive_IT(&i2c, i2cAddr, rxBuf, READ_LEN);
+        HAL_I2C_Master_Receive_IT(&i2c, i2cAddr, hdrBuf, READ_LEN);
     }
-    else if (i2cBusState == BUS_GOT_LEN)
+    else if ((busState == BUS_GOT_LEN) && (rxBufLen == 0))
     {
         // Read payload
+        i2cRetries = 0;
         i2cBusState = BUS_READING_TRANSFER;
         HAL_I2C_Master_Receive_IT(&i2c, i2cAddr, rxBuf, payloadLen);
     }
@@ -431,7 +493,7 @@ static int shtp_i2c_hal_open(sh2_Hal_t *self_)
 {
     // cast sh2_hal_t pointer to i2c_hal_t
     i2c_hal_t *self = (i2c_hal_t *)self_;
-    
+
     if (isOpen)
     {
         return SH2_ERR;
@@ -450,16 +512,12 @@ static int shtp_i2c_hal_open(sh2_Hal_t *self_)
 
     inReset = true;  // will change back to false when INTN serviced
 
-    enableInts();
-
-    // Delay for RESET_DELAY_US to ensure reset takes effect
-    delay_us(RESET_DELAY_US);
-    
     // transition to idle state
     i2cBusState = BUS_IDLE;
 
     // Clear rx, tx buffers
     rxBufLen = 0;
+    hdrBufLen = 0;
     rxDataReady = false;
 
     // To boot in SHTP-I2C mode, must have PS1=0, PS0=0.
@@ -469,65 +527,78 @@ static int shtp_i2c_hal_open(sh2_Hal_t *self_)
     ps0_waken(false);
     ps1(false);
 
-    // Deassert BOOT, don't go into bootloader
+    // Set BOOTN according to whether we need to DFU
     bootn(!self->dfu);
-    
+
+    // Delay for RESET_DELAY_US to ensure reset takes effect
+    delay_us(RESET_DELAY_US);
+
+    enableInts();
+
     // Deassert reset
     rstn(1);
 
     // Wait for INTN to be asserted
     reset_delay_us(START_DELAY_US);
 
+    // Deassert BOOTN after device is done rebooting
+    bootn(true);
+
     return SH2_OK;
 }
 
-#if 0
-
-static int sh2_i2c_hal_open(sh2_Hal_t *self)
-{
-    return sh2_i2c_hal_open_aux(self, false, ADDR_SH2_0);
-}
-
-static int fsp201_i2c_hal_open(sh2_Hal_t *self)
-{
-    return sh2_i2c_hal_open_aux(self, false, ADDR_FSP201_0);
-}
-
-static int fsp201_dfu_i2c_hal_open(sh2_Hal_t *self)
-{
-    return sh2_i2c_hal_open_aux(self, true, ADDR_FSP201_0);
-}
-
-#endif
-
 static void shtp_i2c_hal_close(sh2_Hal_t *self_)
 {
+    i2cBusState = BUS_INIT;
+    delay_us(1000);  // Give any in-flight I2C operations a chance to finish.
+
     // Hold sensor hub in reset
     rstn(false);
     bootn(true);
 
-    i2cBusState = BUS_INIT;
+    // Deinit I2C peripheral
+    HAL_I2C_DeInit(&i2c);
 
     // Disable interrupts
     disableInts();
-    
-    // Deinit I2C peripheral
-    HAL_I2C_DeInit(&i2c);
-    
+
     // Deinit timer
     __HAL_TIM_DISABLE(&tim2);
-    
+
     isOpen = false;
 }
 
 static int shtp_i2c_hal_read(sh2_Hal_t *self_, uint8_t *pBuffer, unsigned len, uint32_t *t)
 {
     int retval = 0;
-    
+
     disableInts();
-    if (rxBufLen > 0)
+    
+    // read bus state just once for consistency.
+    enum BusState_e busState = i2cBusState;
+
+    if (hdrBufLen > 0)
     {
-        // There is data to be had.
+        // There is data in hdrBuf to return to SHTP layer
+        if (len < hdrBufLen)
+        {
+            // Client buffer too small!
+            // Discard what was read
+            hdrBufLen = 0;
+            retval = SH2_ERR_BAD_PARAM;
+        }
+        else
+        {
+            // Copy data to the client buffer
+            memcpy(pBuffer, hdrBuf, hdrBufLen);
+            retval = hdrBufLen;
+            hdrBufLen = 0;
+            *t = rxTimestamp_uS;
+        }
+    }
+    else if (rxBufLen > 0)
+    {
+        // There is data in rxBuf to return to SHTP layer
         if (len < rxBufLen)
         {
             // Client buffer too small!
@@ -546,17 +617,25 @@ static int shtp_i2c_hal_read(sh2_Hal_t *self_, uint8_t *pBuffer, unsigned len, u
     }
     enableInts();
 
-    // if more data is ready, start reading it
+    // if sensor hub asserted INTN, data is ready
     if (rxDataReady)
     {
-        if ((i2cBusState == BUS_IDLE))
+        if ((busState == BUS_IDLE) && (hdrBufLen == 0))
         {
+            i2cRetries = 0;
             rxDataReady = false;
             i2cBusState = BUS_READING_LEN;
-            HAL_I2C_Master_Receive_IT(&i2c, i2cAddr, rxBuf, READ_LEN);
+            HAL_I2C_Master_Receive_IT(&i2c, i2cAddr, hdrBuf, READ_LEN);
         }
-        else if ((i2cBusState == BUS_GOT_LEN))
+        else if ((busState == BUS_GOT_LEN) && (rxBufLen == 0))
         {
+          // Copy the header from rxBuf to pBuffer.  retval = READ_LEN
+            memcpy(pBuffer, hdrBuf, READ_LEN);
+            retval = READ_LEN;
+            hdrBufLen = 0;
+            *t = rxTimestamp_uS;
+            
+            i2cRetries = 0;
             rxDataReady = false;
             i2cBusState = BUS_READING_TRANSFER;
             HAL_I2C_Master_Receive_IT(&i2c, i2cAddr, rxBuf, payloadLen);
@@ -569,7 +648,7 @@ static int shtp_i2c_hal_read(sh2_Hal_t *self_, uint8_t *pBuffer, unsigned len, u
 static int shtp_i2c_hal_write(sh2_Hal_t *self, uint8_t *pBuffer, unsigned len)
 {
     int retval = 0;
-    
+
     // Validate parameters
     if ((pBuffer == 0) || (len == 0) || (len > sizeof(txBuf)))
     {
@@ -578,21 +657,24 @@ static int shtp_i2c_hal_write(sh2_Hal_t *self, uint8_t *pBuffer, unsigned len)
 
     // Disable I2C Interrupt for a moment so busState can't change
     disableI2cInts();
-    
+
     if (i2cBusState == BUS_IDLE)
     {
         i2cBusState = BUS_WRITING;
 
         // Set up write operation
+        i2cRetries = 0;
+        txBufLen = len;
         memcpy(txBuf, pBuffer, len);
-        HAL_I2C_Master_Transmit_IT(&i2c, i2cAddr, txBuf, len);
+        delay_us(I2C_WRITE_DELAY_US);
+        HAL_I2C_Master_Transmit_IT(&i2c, i2cAddr, txBuf, txBufLen);
 
         retval = len;
     }
 
     // re-enable interrupts
     enableI2cInts();
-    
+
     return retval;
 }
 
@@ -608,7 +690,7 @@ static int bno_dfu_i2c_hal_open(sh2_Hal_t *self_)
 {
     // cast sh2_hal_t pointer to i2c_hal_t
     i2c_hal_t *self = (i2c_hal_t *)self_;
-    
+
     if (isOpen)
     {
         return SH2_ERR;
@@ -627,13 +709,14 @@ static int bno_dfu_i2c_hal_open(sh2_Hal_t *self_)
 
     // Delay for RESET_DELAY_US to ensure reset takes effect
     delay_us(RESET_DELAY_US);
-    
+
     // Clear rx, tx buffers
     rxBufLen = 0;
+    hdrBufLen = 0;
     rxDataReady = false;
-    
+
     i2cBusState = BUS_IDLE;
-    
+
     // Enable interrupts.
     enableI2cInts();
 
@@ -660,16 +743,16 @@ static void bno_dfu_i2c_hal_close(sh2_Hal_t *self)
 {
     // Hold sensor hub in reset, for dfu
     rstn(false);
-    
+
     // Disable interrupts
     disableInts();
-    
+
     // Deinit I2C peripheral
     HAL_I2C_DeInit(&i2c);
 
     // Deinit timer
     __HAL_TIM_DISABLE(&tim2);
-    
+
     isOpen = false;
 }
 
@@ -677,7 +760,10 @@ static int bno_dfu_i2c_hal_read(sh2_Hal_t *self, uint8_t *pBuffer, unsigned len,
 {
     int retval = 0;
     
-    if ((i2cBusState != BUS_READING_DFU) && (rxBufLen > 0))
+    // Only read i2cBusState once for consistency.
+    enum BusState_e busState = i2cBusState;
+
+    if ((busState != BUS_READING_DFU) && (rxBufLen > 0))
     {
         // There is data to be had.
         if (len < rxBufLen)
@@ -699,11 +785,12 @@ static int bno_dfu_i2c_hal_read(sh2_Hal_t *self, uint8_t *pBuffer, unsigned len,
     else
     {
         // Initiate read if none already in progress.
-        if (i2cBusState == BUS_IDLE)
+        if (busState == BUS_IDLE)
         {
-            i2cBusState = BUS_READING_DFU;
+            i2cRetries = 0;
             payloadLen = len;
-            HAL_I2C_Master_Receive_IT(&i2c, i2cAddr, rxBuf, len);
+            i2cBusState = BUS_READING_DFU;
+            HAL_I2C_Master_Receive_IT(&i2c, i2cAddr, rxBuf, payloadLen);
         }
     }
 
@@ -714,6 +801,8 @@ static int bno_dfu_i2c_hal_write(sh2_Hal_t *self, uint8_t *pBuffer, unsigned len
 {
     int retval = 0;
     
+
+
     // Validate parameters
     if ((pBuffer == 0) || (len == 0) || (len > sizeof(txBuf)))
     {
@@ -722,20 +811,25 @@ static int bno_dfu_i2c_hal_write(sh2_Hal_t *self, uint8_t *pBuffer, unsigned len
 
     disableI2cInts();
     
-    if (i2cBusState == BUS_IDLE)
+    // read bus state just once for consistency.
+    enum BusState_e busState = i2cBusState;
+
+    if (busState == BUS_IDLE)
     {
         i2cBusState = BUS_WRITING_DFU;
 
         // Set up write operation
+        i2cRetries = 0;
+        txBufLen = len;
         memcpy(txBuf, pBuffer, len);
-        HAL_I2C_Master_Transmit_IT(&i2c, i2cAddr, txBuf, len);
+        HAL_I2C_Master_Transmit_IT(&i2c, i2cAddr, txBuf, txBufLen);
 
         retval = len;
     }
-    
+
     // re-enable interrupts
     enableI2cInts();
-    
+
     return retval;
 }
 
@@ -743,57 +837,6 @@ static uint32_t bno_dfu_i2c_hal_getTimeUs(sh2_Hal_t *self)
 {
     return timeNowUs();
 }
-
-#if 0
-// ------------------------------------------------------------------------
-// Public methods
-
-sh2_Hal_t *sh2_hal_init(void)
-{
-    // Set up the HAL reference object for the client
-    sh2Hal.open = sh2_i2c_hal_open;
-    sh2Hal.close = sh2_i2c_hal_close;
-    sh2Hal.read = sh2_i2c_hal_read;
-    sh2Hal.write = sh2_i2c_hal_write;
-    sh2Hal.getTimeUs = sh2_i2c_hal_getTimeUs;
-
-    return &sh2Hal;
-}
-
-sh2_Hal_t *bno_dfu_hal_init(void)
-{
-    // Set up the HAL reference object for the client
-    bnoDfuHal.open = bno_dfu_i2c_hal_open;
-    bnoDfuHal.close = bno_dfu_i2c_hal_close;
-    bnoDfuHal.read = bno_dfu_i2c_hal_read;
-    bnoDfuHal.write = bno_dfu_i2c_hal_write;
-    bnoDfuHal.getTimeUs = bno_dfu_i2c_hal_getTimeUs;
-
-    return &bnoDfuHal;
-}
-
-sh2_Hal_t *fsp201_hal_init(void)
-{
-    fsp201Hal.open = fsp201_i2c_hal_open;
-    fsp201Hal.close = sh2_i2c_hal_close;
-    fsp201Hal.read = sh2_i2c_hal_read;
-    fsp201Hal.write = sh2_i2c_hal_write;
-    fsp201Hal.getTimeUs = sh2_i2c_hal_getTimeUs;
-
-    return &fsp201Hal;
-}
-
-sh2_Hal_t *fsp201_dfu_hal_init(void)
-{
-    fsp201DfuHal.open = fsp201_dfu_i2c_hal_open;
-    fsp201DfuHal.close = sh2_i2c_hal_close;
-    fsp201DfuHal.read = sh2_i2c_hal_read;
-    fsp201DfuHal.write = sh2_i2c_hal_write;
-    fsp201DfuHal.getTimeUs = sh2_i2c_hal_getTimeUs;
-
-    return &fsp201DfuHal;
-}
-#endif
 
 sh2_Hal_t *shtp_i2c_hal_init(i2c_hal_t *pHal, bool dfu, uint8_t addr)
 {
@@ -813,7 +856,7 @@ sh2_Hal_t *bno_dfu_i2c_hal_init(i2c_hal_t *pHal, bool dfu, uint8_t addr)
 {
     pHal->dfu = dfu;
     pHal->i2c_addr = addr;
-    
+
     // Set up the HAL reference object for the client
     pHal->sh2_hal.open = bno_dfu_i2c_hal_open;
     pHal->sh2_hal.close = bno_dfu_i2c_hal_close;

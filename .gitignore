@@ -31,8 +31,8 @@
 
 # Firmware files that we don't want in project
 _firmware*
-
-EWARM.foo
+dfu/firmware-bno*
+dfu/firmware-fsp*
 
 
 
