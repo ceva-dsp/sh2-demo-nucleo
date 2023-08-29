@@ -330,8 +330,11 @@ static void reset_delay_us(uint32_t t)
 
 void HAL_I2C_MasterRxCpltCallback(I2C_HandleTypeDef *pI2c)
 {
+    // read bus state just once for consistency.
+    enum BusState_e busState = i2cBusState;
+    
     // Read completed
-    if (i2cBusState == BUS_READING_LEN)
+    if (busState == BUS_READING_LEN)
     {
         // Len of payload is available, decide how long to do next read
         uint16_t len = (hdrBuf[0] + (hdrBuf[1] << 8)) & ~0x8000;
@@ -348,7 +351,7 @@ void HAL_I2C_MasterRxCpltCallback(I2C_HandleTypeDef *pI2c)
         hdrBufLen = READ_LEN;
         i2cBusState = BUS_GOT_LEN;
     }
-    else if (i2cBusState == BUS_READING_TRANSFER)
+    else if (busState == BUS_READING_TRANSFER)
     {
         // rxBuf is now ready for client.
         rxBufLen = payloadLen;
@@ -356,7 +359,7 @@ void HAL_I2C_MasterRxCpltCallback(I2C_HandleTypeDef *pI2c)
         // Nothing left to do
         i2cBusState = BUS_IDLE;
     }
-    else if (i2cBusState == BUS_READING_DFU)
+    else if (busState == BUS_READING_DFU)
     {
         // Transition back to idle state
         hdrBufLen = 0;
@@ -367,12 +370,15 @@ void HAL_I2C_MasterRxCpltCallback(I2C_HandleTypeDef *pI2c)
 
 void HAL_I2C_MasterTxCpltCallback(I2C_HandleTypeDef *i2c)
 {
-    if (i2cBusState == BUS_WRITING)
+    // read bus state just once for consistency.
+    enum BusState_e busState = i2cBusState;
+    
+    if (busState == BUS_WRITING)
     {
         // Switch back to bus idle
         i2cBusState = BUS_IDLE;
     }
-    else if (i2cBusState == BUS_WRITING_DFU)
+    else if (busState == BUS_WRITING_DFU)
     {
         // Switch back to bus idle
         i2cBusState = BUS_IDLE;
@@ -425,7 +431,10 @@ void HAL_I2C_ErrorCallback(I2C_HandleTypeDef *i2c)
 
 void HAL_GPIO_EXTI_Callback(uint16_t n)
 {
-    if (i2cBusState == BUS_INIT)
+    // read bus state just once for consistency.
+    enum BusState_e busState = i2cBusState;
+    
+    if (busState == BUS_INIT)
     {
         // No active hal, ignore this call, don't crash.
         return;
@@ -435,7 +444,7 @@ void HAL_GPIO_EXTI_Callback(uint16_t n)
     inReset = false;
 
     // Start read, if possible
-    if ((i2cBusState == BUS_IDLE) && (hdrBufLen == 0) && (rxBufLen == 0))
+    if ((busState == BUS_IDLE) && (hdrBufLen == 0) && (rxBufLen == 0))
     {
         rxTimestamp_uS = timeNowUs();
 
@@ -444,7 +453,7 @@ void HAL_GPIO_EXTI_Callback(uint16_t n)
         i2cBusState = BUS_READING_LEN;
         HAL_I2C_Master_Receive_IT(&i2c, i2cAddr, hdrBuf, READ_LEN);
     }
-    else if ((i2cBusState == BUS_GOT_LEN) && (rxBufLen == 0))
+    else if ((busState == BUS_GOT_LEN) && (rxBufLen == 0))
     {
         // Read payload
         i2cRetries = 0;
@@ -564,6 +573,9 @@ static int shtp_i2c_hal_read(sh2_Hal_t *self_, uint8_t *pBuffer, unsigned len, u
     int retval = 0;
 
     disableInts();
+    
+    // read bus state just once for consistency.
+    enum BusState_e busState = i2cBusState;
 
     if (hdrBufLen > 0)
     {
@@ -608,14 +620,14 @@ static int shtp_i2c_hal_read(sh2_Hal_t *self_, uint8_t *pBuffer, unsigned len, u
     // if sensor hub asserted INTN, data is ready
     if (rxDataReady)
     {
-        if ((i2cBusState == BUS_IDLE) && (hdrBufLen == 0))
+        if ((busState == BUS_IDLE) && (hdrBufLen == 0))
         {
             i2cRetries = 0;
             rxDataReady = false;
             i2cBusState = BUS_READING_LEN;
             HAL_I2C_Master_Receive_IT(&i2c, i2cAddr, hdrBuf, READ_LEN);
         }
-        else if ((i2cBusState == BUS_GOT_LEN) && (rxBufLen == 0))
+        else if ((busState == BUS_GOT_LEN) && (rxBufLen == 0))
         {
           // Copy the header from rxBuf to pBuffer.  retval = READ_LEN
             memcpy(pBuffer, hdrBuf, READ_LEN);
@@ -747,8 +759,11 @@ static void bno_dfu_i2c_hal_close(sh2_Hal_t *self)
 static int bno_dfu_i2c_hal_read(sh2_Hal_t *self, uint8_t *pBuffer, unsigned len, uint32_t *t)
 {
     int retval = 0;
+    
+    // Only read i2cBusState once for consistency.
+    enum BusState_e busState = i2cBusState;
 
-    if ((i2cBusState != BUS_READING_DFU) && (rxBufLen > 0))
+    if ((busState != BUS_READING_DFU) && (rxBufLen > 0))
     {
         // There is data to be had.
         if (len < rxBufLen)
@@ -770,7 +785,7 @@ static int bno_dfu_i2c_hal_read(sh2_Hal_t *self, uint8_t *pBuffer, unsigned len,
     else
     {
         // Initiate read if none already in progress.
-        if (i2cBusState == BUS_IDLE)
+        if (busState == BUS_IDLE)
         {
             i2cRetries = 0;
             payloadLen = len;
@@ -785,6 +800,8 @@ static int bno_dfu_i2c_hal_read(sh2_Hal_t *self, uint8_t *pBuffer, unsigned len,
 static int bno_dfu_i2c_hal_write(sh2_Hal_t *self, uint8_t *pBuffer, unsigned len)
 {
     int retval = 0;
+    
+
 
     // Validate parameters
     if ((pBuffer == 0) || (len == 0) || (len > sizeof(txBuf)))
@@ -793,8 +810,11 @@ static int bno_dfu_i2c_hal_write(sh2_Hal_t *self, uint8_t *pBuffer, unsigned len
     }
 
     disableI2cInts();
+    
+    // read bus state just once for consistency.
+    enum BusState_e busState = i2cBusState;
 
-    if (i2cBusState == BUS_IDLE)
+    if (busState == BUS_IDLE)
     {
         i2cBusState = BUS_WRITING_DFU;
 
